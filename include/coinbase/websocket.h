@@ -11,6 +11,7 @@
 #include <coinbase/order.h>
 #include <coinbase/position.h>
 #include <coinbase/auth.h>
+#include <slick/queue.h>
 
 namespace coinbase {
 
@@ -56,7 +57,10 @@ inline std::string to_string(WebSocketChannel channel) {
     return "UNKNOWN_CHANNEL";
 }
 
+class WebSocketClient;
+
 struct WebsocketCallbacks {
+    virtual ~WebsocketCallbacks() = default;
     virtual void onLevel2Snapshot(const Level2UpdateBatch& snapshot) = 0;
     virtual void onLevel2Updates(const Level2UpdateBatch& updates) = 0;
     virtual void onMarketTradesSnapshot(const std::vector<MarketTrade>& snapshots) = 0;
@@ -74,6 +78,28 @@ struct WebsocketCallbacks {
     virtual void onUserDataError(std::string err) = 0;
 };
 
+struct UserThreadWebsocketCallbacks : public WebsocketCallbacks
+{
+    UserThreadWebsocketCallbacks(uint32_t queue_size = 16777216)
+        : data_queue_(queue_size)
+    {}
+
+    ~UserThreadWebsocketCallbacks() override = default;
+    
+    // Displatch data to the user thread
+    void dispatchData(const char* data, std::size_t size);
+
+    // Process data in the user thread. Callbacks will be invoked in the user thread.
+    void processData();
+
+private:
+    friend class WebSocketClient;
+    WebSocketClient* client_ = nullptr;
+    slick::SlickQueue<char> data_queue_;
+    uint64_t read_cursor_ = 0;
+};
+
+
 class WebSocketClient {
 public:
     WebSocketClient(
@@ -87,6 +113,7 @@ public:
 
 private:
     void onData(const char* data, std::size_t size);
+    void processData(const char* data, std::size_t size);
     void onMarketDataError(std::string err);
     void onUserDataError(std::string err);
     void checkMarketDataSequenceNumber(int64_t seq_num);
@@ -103,6 +130,7 @@ private:
     void processFuturesBalanceSummary(const json& j);
 
 private:
+    friend class UserThreadWebsocketCallbacks;
     WebsocketCallbacks *callbacks_;
     std::string market_data_url_;
     std::string user_data_url_;
@@ -113,7 +141,24 @@ private:
     std::array<std::unordered_set<std::string>, static_cast<uint8_t>(WebSocketChannel::__COUNT__)> product_ids_;
     std::vector<std::string> pending_subscriptions_;
     std::string user_id_;
+    UserThreadWebsocketCallbacks *user_thread_callbacks_ = nullptr;
 };
+
+
+
+
+void UserThreadWebsocketCallbacks::dispatchData(const char* data, std::size_t size) {
+    auto index = data_queue_.reserve(size);
+    std::memcpy(data_queue_[index], data, size);
+    data_queue_.publish(index, size);
+}
+
+void UserThreadWebsocketCallbacks::processData() {
+    auto [data_ptr, data_size] = data_queue_.read(read_cursor_);
+    if (data_ptr && data_size > 0) {
+        client_->processData(data_ptr, data_size);
+    }
+}
 
 
 inline WebSocketClient::WebSocketClient(
@@ -135,7 +180,11 @@ inline WebSocketClient::WebSocketClient(
         [this]() { LOG_INFO("User data disconnected"); },
         [this](const char* data, std::size_t size) { onData(data, size); },
         [this](std::string err) { onUserDataError(err); }))
+    , user_thread_callbacks_(dynamic_cast<UserThreadWebsocketCallbacks*>(callbacks))
 {
+    if (user_thread_callbacks_) {
+        user_thread_callbacks_->client_ = this;
+    }
 }
 
 inline WebSocketClient::~WebSocketClient() {
@@ -195,6 +244,15 @@ inline void WebSocketClient::unsubscribe(const std::vector<std::string> &product
 }
 
 inline void WebSocketClient::onData(const char* data, std::size_t size) {
+    if (user_thread_callbacks_) {
+        user_thread_callbacks_->dispatchData(data, size);
+    }
+    else {
+        processData(data, size);
+    }
+}
+
+inline void WebSocketClient::processData(const char* data, std::size_t size) {
     try {
         auto j = json::parse(data, data + size);
         auto channel = j["channel"];

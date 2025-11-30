@@ -23,7 +23,8 @@
 
 
 namespace coinbase::tests {
-    class WebSocketTests : public ::testing::Test, public WebsocketCallbacks {
+    template<typename CallbacksType>
+    class WebSocketT : public ::testing::Test, public CallbacksType {
     protected:
         std::unique_ptr<WebSocketClient> client_;
         std::atomic_bool snapshot_received_ = 0;
@@ -211,6 +212,9 @@ namespace coinbase::tests {
         }
     };
 
+    using WebSocketTests = WebSocketT<WebsocketCallbacks>;
+    using UserThreadWebSocketTests = WebSocketT<UserThreadWebsocketCallbacks>;
+
     TEST_F(WebSocketTests, UserChannel) {
         client_->subscribe({"BTC-USD"}, {WebSocketChannel::USER});
         while (!snapshot_received_.load(std::memory_order_relaxed)) {
@@ -265,6 +269,74 @@ namespace coinbase::tests {
     TEST_F(WebSocketTests, StatusChannel) {
         client_->subscribe({"BTC-USD"}, {WebSocketChannel::STATUS});
         while (snapshot_received_.load(std::memory_order_relaxed)) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+    }
+
+    TEST_F(UserThreadWebSocketTests, UserChannel) {
+        client_->subscribe({"BTC-USD"}, {WebSocketChannel::USER});
+        while (!snapshot_received_.load(std::memory_order_relaxed)) {
+            processData();
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+    }
+
+    TEST_F(UserThreadWebSocketTests, Level2Channel) {
+        client_->subscribe({"BTC-USD"}, {WebSocketChannel::LEVEL2});
+        while (snapshot_received_.load(std::memory_order_relaxed)) {
+            processData();
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+
+        while (update_received_count_.load(std::memory_order_relaxed) < 10) {
+            processData();
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+    }
+
+    TEST_F(UserThreadWebSocketTests, MarketTradesChannel) {
+        client_->subscribe({"BTC-USD"}, {WebSocketChannel::MARKET_TRADES});
+        while (snapshot_received_.load(std::memory_order_relaxed)) {
+            processData();
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+
+        while (update_received_count_.load(std::memory_order_relaxed) < 10) {
+            processData();
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+    }
+
+    TEST_F(UserThreadWebSocketTests, CandlesChannel) {
+        client_->subscribe({"BTC-USD"}, {WebSocketChannel::CANDLES});
+        while (snapshot_received_.load(std::memory_order_relaxed)) {
+            processData();
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+
+        while (update_received_count_.load(std::memory_order_relaxed) < 5) {
+            processData();
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+    }
+
+    TEST_F(UserThreadWebSocketTests, TickerChannel) {
+        client_->subscribe({"BTC-USD"}, {WebSocketChannel::TICKER});
+        while (snapshot_received_.load(std::memory_order_relaxed)) {
+            processData();
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+
+        while (update_received_count_.load(std::memory_order_relaxed) < 5) {
+            processData();
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+    }
+
+    TEST_F(UserThreadWebSocketTests, StatusChannel) {
+        client_->subscribe({"BTC-USD"}, {WebSocketChannel::STATUS});
+        while (snapshot_received_.load(std::memory_order_relaxed)) {
+            processData();
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
     }
