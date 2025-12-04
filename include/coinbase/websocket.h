@@ -5,6 +5,7 @@
 #include <vector>
 #include <array>
 #include <memory>
+#include <fstream>
 #include <slick/net/websocket.h>
 #include <nlohmann/json.hpp>
 #include <coinbase/market_data.h>
@@ -86,9 +87,6 @@ struct UserThreadWebsocketCallbacks : public WebsocketCallbacks
 
     ~UserThreadWebsocketCallbacks() override = default;
     
-    // Displatch data to the user thread
-    void dispatchData(const char* data, std::size_t size, char channel);
-
     // Process data in the user thread. Callbacks will be invoked in the user thread.
     void processData();
 
@@ -110,6 +108,7 @@ public:
 
     void subscribe(const std::vector<std::string> &product_ids, const std::vector<WebSocketChannel> &channels);
     void unsubscribe(const std::vector<std::string> &product_ids, const std::vector<WebSocketChannel> &channels);
+    void logData(std::string_view data_file, uint32_t queue_size = 16777216);
 
 private:
     void onMarketData(const char* data, std::size_t size);
@@ -130,6 +129,8 @@ private:
     void processHeartbeat(const json& j);
     void processStatus(const json& j);
     void processFuturesBalanceSummary(const json& j);
+    void dispatchData(const char* data, std::size_t size, char channel);
+    void runDataLogger();
 
 private:
     friend class UserThreadWebsocketCallbacks;
@@ -144,18 +145,14 @@ private:
     std::vector<std::string> pending_subscriptions_;
     std::string user_id_;
     UserThreadWebsocketCallbacks *user_thread_callbacks_ = nullptr;
+    std::fstream data_log_;
+    slick::SlickQueue<char> *data_queue_ = nullptr;
+    std::thread logger_thread_;
+    std::atomic_bool logger_run_ = false;
+    uint64_t data_cursor_ = 0;
 };
 
 
-
-
-inline void UserThreadWebsocketCallbacks::dispatchData(const char* data, std::size_t size, char channel) {
-    auto sz = size + 1;
-    auto index = data_queue_.reserve(sz);
-    *data_queue_[index] = channel;
-    std::memcpy(data_queue_[index + 1], data, size);
-    data_queue_.publish(index, sz);
-}
 
 inline void UserThreadWebsocketCallbacks::processData() {
     auto [data_ptr, data_size] = data_queue_.read(read_cursor_);
@@ -195,6 +192,7 @@ inline WebSocketClient::WebSocketClient(
 {
     if (user_thread_callbacks_) {
         user_thread_callbacks_->client_ = this;
+        data_queue_ = &user_thread_callbacks_->data_queue_;
     }
 }
 
@@ -209,6 +207,15 @@ inline WebSocketClient::~WebSocketClient() {
         LOG_INFO("Closing user data websocket");
         user_data_websocket_->close();
         user_data_websocket_.reset();
+    }
+
+    logger_run_.store(false, std::memory_order_release);
+    if (logger_thread_.joinable()) {
+        logger_thread_.join();
+    }
+    if (data_queue_ && !user_thread_callbacks_) {
+        delete data_queue_;
+        data_queue_ = nullptr;
     }
 }
 
@@ -254,21 +261,81 @@ inline void WebSocketClient::unsubscribe(const std::vector<std::string> &product
     }
 }
 
+inline void WebSocketClient::logData(std::string_view data_file, uint32_t data_queue_size) {
+    data_log_.open(data_file, std::ios::out | std::ios::ate);
+    if (data_log_.is_open()) {
+        if (user_thread_callbacks_) {
+            data_queue_ = &user_thread_callbacks_->data_queue_;
+        }
+        else {
+            data_queue_ = new slick::SlickQueue<char>(data_queue_size);
+        }
+        logger_run_.store(true, std::memory_order_release);
+        logger_thread_ = std::thread([this](){
+            runDataLogger();
+        });
+    }
+    else {
+        LOG_ERROR("Failed to open data_file {}.", data_file);
+    }
+}
+
+inline void WebSocketClient::dispatchData(const char* data, std::size_t size, char channel) {
+    assert(data_queue_);
+    auto sz = size + 1;
+    auto index = data_queue_->reserve(sz);
+    *(*data_queue_)[index] = channel;
+    std::memcpy((*data_queue_)[index + 1], data, size);
+    data_queue_->publish(index, sz);
+}
+
+inline void WebSocketClient::runDataLogger() {
+    if (!data_queue_ || !data_log_.is_open()) {
+        return;
+    }
+
+    while (logger_run_.load(std::memory_order_relaxed)) {
+        auto [data, size] = data_queue_->read(data_cursor_);
+        if (data) {
+            ++data;     // skip channel identifier
+            data_log_.write(data, size - 1);
+            data_log_ << std::endl;
+        }
+    }
+
+    // drain data queue
+    while (true) {
+        auto [data, size] = data_queue_->read(data_cursor_);
+        if (!data) {
+            break;
+        }
+        ++data;     // skip channel identifier
+        data_log_.write(data, size - 1);
+        data_log_ << std::endl;
+    }
+}
+
 inline void WebSocketClient::onMarketData(const char* data, std::size_t size) {
     if (user_thread_callbacks_) {
-        user_thread_callbacks_->dispatchData(data, size, 'M');
+        dispatchData(data, size, 'M');
     }
     else {
         processMarketData(data, size);
+        if (data_queue_) {
+            dispatchData(data, size, 'M');
+        }
     }
 }
 
 inline void WebSocketClient::onUserData(const char* data, std::size_t size) {
     if (user_thread_callbacks_) {
-        user_thread_callbacks_->dispatchData(data, size, 'U');
+        dispatchData(data, size, 'U');
     }
     else {
         processUserData(data, size);
+        if (data_queue_) {
+            dispatchData(data, size, 'M');
+        }
     }
 }
 

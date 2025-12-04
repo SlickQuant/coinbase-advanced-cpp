@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 #include <atomic>
+#include <cstdio>
+#include <filesystem>
 
 #include <slick/logger.hpp>
 
@@ -38,6 +40,7 @@ namespace coinbase::tests {
 
         void TearDown() override {
             client_.reset();
+            std::remove("coinbase.log");
         }
 
         void onLevel2Snapshot(const Level2UpdateBatch& snapshot) override {
@@ -339,5 +342,49 @@ namespace coinbase::tests {
             processData();
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
+    }
+
+    TEST_F(WebSocketTests, DataLogger) {
+        std::remove("coinbase.log");
+        EXPECT_FALSE(std::filesystem::exists("coinbase.log"));
+
+        client_->logData("coinbase.log");
+        client_->subscribe({"BTC-USD"}, {WebSocketChannel::LEVEL2, WebSocketChannel::USER});
+        while (snapshot_received_.load(std::memory_order_relaxed)) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+
+        while (update_received_count_.load(std::memory_order_relaxed) < 5) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+
+        EXPECT_TRUE(std::filesystem::exists("coinbase.log"));
+        std::ifstream f("coinbase.log");
+        std::string line;
+        EXPECT_TRUE(std::getline(f, line));
+        EXPECT_FALSE(line.empty());
+    }
+
+    TEST_F(UserThreadWebSocketTests, DataLogger) {
+        std::remove("coinbase.log");
+        EXPECT_FALSE(std::filesystem::exists("coinbase.log"));
+
+        client_->logData("coinbase.log");
+        client_->subscribe({"BTC-USD"}, {WebSocketChannel::LEVEL2, WebSocketChannel::USER});
+        while (snapshot_received_.load(std::memory_order_relaxed)) {
+            processData();
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+
+        while (update_received_count_.load(std::memory_order_relaxed) < 5) {
+            processData();
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+
+        EXPECT_TRUE(std::filesystem::exists("coinbase.log"));
+        std::ifstream f("coinbase.log");
+        std::string line;
+        EXPECT_TRUE(std::getline(f, line));
+        EXPECT_FALSE(line.empty());
     }
 }
