@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 #include <nlohmann/json.hpp>
-#include <coinbase/utils.h>
+#include <coinbase/utils.hpp>
 
 using json = nlohmann::json;
 

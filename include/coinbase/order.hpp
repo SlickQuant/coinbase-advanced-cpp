@@ -7,8 +7,8 @@
 #include <string>
 #include <optional>
 #include <mutex>
-#include <coinbase/utils.h>
-#include <coinbase/common.h>
+#include <coinbase/utils.hpp>
+#include <coinbase/common.hpp>
 
 namespace coinbase {
 

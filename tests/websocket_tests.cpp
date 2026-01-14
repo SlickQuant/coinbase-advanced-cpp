@@ -21,7 +21,7 @@
     #endif
 #endif
 
-#include <coinbase/websocket.h>
+#include <coinbase/websocket.hpp>
 
 
 namespace coinbase::tests {

@@ -10,7 +10,7 @@
 #include <cstdint>
 #include <sstream>
 #include <nlohmann/json.hpp>
-#include <coinbase/side.h>
+#include <coinbase/side.hpp>
 
 using json = nlohmann::json;
 

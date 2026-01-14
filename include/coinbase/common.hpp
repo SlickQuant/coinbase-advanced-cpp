@@ -4,6 +4,10 @@
 
 #pragma once
 
+#include <cstdint>
+#include <string_view>
+#include <string>
+
 namespace coinbase {
 
 enum class ContractExpiryType : uint8_t {

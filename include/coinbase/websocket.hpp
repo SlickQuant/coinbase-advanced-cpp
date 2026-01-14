@@ -12,11 +12,11 @@
 #include <fstream>
 #include <slick/net/websocket.h>
 #include <nlohmann/json.hpp>
-#include <coinbase/market_data.h>
-#include <coinbase/order.h>
-#include <coinbase/position.h>
-#include <coinbase/auth.h>
-#include <slick/queue.h>
+#include <coinbase/market_data.hpp>
+#include <coinbase/order.hpp>
+#include <coinbase/position.hpp>
+#include <coinbase/auth.hpp>
+#include <slick/queue.hpp>
 
 namespace coinbase {
 

@@ -11,7 +11,7 @@
 #include <jwt-cpp/jwt.h>
 #include <jwt-cpp/traits/nlohmann-json/traits.h>
 #include <random>
-#include <coinbase/utils.h>
+#include <coinbase/utils.hpp>
 
 namespace coinbase {
 

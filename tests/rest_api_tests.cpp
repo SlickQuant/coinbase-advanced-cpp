@@ -25,7 +25,7 @@
     #endif
 #endif
 
-#include <coinbase/rest.h>
+#include <coinbase/rest.hpp>
 
 namespace coinbase::tests {
 

@@ -6,7 +6,7 @@
 
 #include <string>
 #include <string_view>
-#include <coinbase/utils.h>
+#include <coinbase/utils.hpp>
 #include <nlohmann/json.hpp>
 
 namespace coinbase {
