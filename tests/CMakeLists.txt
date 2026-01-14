@@ -22,19 +22,17 @@ set(BUILD_SLICK_LOGGER_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(BUILD_SLICK_LOGGER_TESTING OFF CACHE BOOL "" FORCE)
 set(BUILD_SLICK_LOGGER_BENCHMARKS OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
-    slick_logger
-    GIT_REPOSITORY https://github.com/SlickQuant/slick_logger.git
-    GIT_TAG v1.0.1
+    slick-logger
+    GIT_REPOSITORY https://github.com/SlickQuant/slick-logger.git
+    GIT_TAG v1.0.4
 )
-FetchContent_MakeAvailable(slick_logger)
-
-enable_testing()
+FetchContent_MakeAvailable(slick-logger)
 
 include(GoogleTest)
 
 add_executable(coinbase_advance_tests rest_api_tests.cpp websocket_tests.cpp)
 target_include_directories(coinbase_advance_tests PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(coinbase_advance_tests PRIVATE coinbase_advanced_cpp slick_net GTest::gtest_main)
+target_link_libraries(coinbase_advance_tests PRIVATE coinbase-advanced-cpp slick-net GTest::gtest_main)
 
 # Discover tests with increased timeout
 gtest_discover_tests(coinbase_advance_tests DISCOVERY_TIMEOUT 30)

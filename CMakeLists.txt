@@ -2,11 +2,9 @@ cmake_minimum_required(VERSION 3.20)
 
 set(CMAKE_CXX_STANDARD 20)
 
-project(coinbase_advanced_cpp
+project(coinbase-advanced-cpp
     VERSION 0.1.0
     LANGUAGES CXX)
-
-message(STATUS "coinbase_advance_cpp: ${PROJECT_VERSION}")
 
 if (CMAKE_BUILD_TYPE MATCHES Debug)
     add_definitions(-DDEBUG)
@@ -24,19 +22,16 @@ include(FetchContent)
 set(BUILD_SLICK_NET_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(BUILD_SLICK_NET_TESTS OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
-    slick_net
-    GIT_REPOSITORY https://github.com/SlickQuant/slick_net.git
-    GIT_TAG v1.2.1
+    slick-net
+    GIT_REPOSITORY https://github.com/SlickQuant/slick-net.git
+    GIT_TAG v1.2.2
 )
-FetchContent_MakeAvailable(slick_net)
+FetchContent_MakeAvailable(slick-net)
 
-message(STATUS "Slick Queue: ${slick_queue_SOURCE_DIR}")
-message(STATUS "Slick Net: ${slick_net_SOURCE_DIR}")
-
-add_library(coinbase_advanced_cpp INTERFACE)
-target_include_directories(coinbase_advanced_cpp INTERFACE include)
-target_link_libraries(coinbase_advanced_cpp INTERFACE slick_net #[[Boost::asio Boost::beast Boost::context OpenSSL::SSL OpenSSL::Crypto]])
-target_precompile_headers(coinbase_advanced_cpp INTERFACE 
+add_library(coinbase-advanced-cpp INTERFACE)
+target_include_directories(coinbase-advanced-cpp INTERFACE include)
+target_link_libraries(coinbase-advanced-cpp INTERFACE slick::net jwt-cpp::jwt-cpp)
+target_precompile_headers(coinbase-advanced-cpp INTERFACE 
     <nlohmann/json.hpp>
     <atomic>
     <cstdlib>
@@ -63,22 +58,26 @@ target_precompile_headers(coinbase_advanced_cpp INTERFACE
     # External dependencies
     <slick/queue.h>
 )
+
 if (MSVC)
     set(CMAKE_CXX_FLAGS_RELEASE "-O2")
     add_definitions(-D_WIN32_WINNT=0x0A00)
     set(CMAKE_SUPPRESS_REGENERATION true)   # supress zero_check
-    set_target_properties(coinbase_advanced_cpp PROPERTIES LINK_INCREMENTAL ON)
-    target_compile_options(coinbase_advanced_cpp INTERFACE "/MP" "/FS" "/bigobj" "/wd4101")
+    set_target_properties(coinbase-advanced-cpp PROPERTIES LINK_INCREMENTAL ON)
+    target_compile_options(coinbase-advanced-cpp INTERFACE "/MP" "/FS" "/bigobj" "/wd4101")
     # Faster linking
     add_link_options(/DEBUG:FASTLINK)
 else()
     set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 endif()
 
-option(BUILD_COINBASE_ADVANCED_TESTS "Build tests" OFF)
+option(BUILD_COINBASE_ADVANCED_TESTS "Build tests" ON)
 if (BUILD_COINBASE_ADVANCED_TESTS)
-    message(STATUS "Building coinbase_advanced_cpp tests")
+    message(STATUS "Building coinbase-advanced-cpp tests")
+    enable_testing()
     add_subdirectory(tests)
 else()
-    message(STATUS "Skipping coinbase_advanced_cpp tests")
+    message(STATUS "Skipping coinbase-advanced-cpp tests")
 endif()
+
+message(STATUS "coinbase-advance-cpp: ${PROJECT_VERSION}")

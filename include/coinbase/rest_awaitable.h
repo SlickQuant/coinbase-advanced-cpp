@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026 Slick Quant
+// https://github.com/SlickQuant/slick-socket
+
 #pragma once
 
 #include <string>

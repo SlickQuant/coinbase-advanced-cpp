@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2025-2026 Slick Quant
+// https://github.com/SlickQuant/slick-socket
+
 #pragma once
 
 #include <string>
@@ -19,7 +23,7 @@ namespace coinbase {
 using Websocket = slick::net::Websocket;
 using json = nlohmann::json;
 
-enum class WebSocketChannel : uint8_t {
+enum WebSocketChannel : uint8_t {
     HEARTBEAT,
     LEVEL2,
     MARKET_TRADES,
