@@ -16,7 +16,7 @@
 #include <coinbase/order.hpp>
 #include <coinbase/position.hpp>
 #include <coinbase/auth.hpp>
-#include <slick/queue.hpp>
+#include <slick/queue.h>
 
 namespace coinbase {
 
