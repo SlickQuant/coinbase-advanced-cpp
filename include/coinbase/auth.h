@@ -5,7 +5,9 @@
 #pragma once
 
 #include <string>
+#ifndef JWT_DISABLE_PICOJSON
 #define JWT_DISABLE_PICOJSON
+#endif
 #include <jwt-cpp/jwt.h>
 #include <jwt-cpp/traits/nlohmann-json/traits.h>
 #include <random>
