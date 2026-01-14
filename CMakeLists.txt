@@ -23,20 +23,22 @@ find_package(slick-net 1.2.2 CONFIG QUIET)
 if (NOT slick-net_FOUND)
     message(STATUS "fetching slick-net...")
     include(FetchContent)
-    if (NOT TARGET slick::net)
-        set(BUILD_SLICK_NET_EXAMPLES OFF CACHE BOOL "" FORCE)
-        set(BUILD_SLICK_NET_TESTS OFF CACHE BOOL "" FORCE)
-        FetchContent_Declare(
-            slick-net
-            GIT_REPOSITORY https://github.com/SlickQuant/slick-net.git
-            GIT_TAG v1.2.2
-        )
-        FetchContent_MakeAvailable(slick-net)
-    endif()
+    set(BUILD_SLICK_NET_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(BUILD_SLICK_NET_TESTS OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        slick-net
+        GIT_REPOSITORY https://github.com/SlickQuant/slick-net.git
+        GIT_TAG v1.2.2
+    )
+    FetchContent_MakeAvailable(slick-net)
 endif()
 
 add_library(coinbase-advanced-cpp INTERFACE)
-target_include_directories(coinbase-advanced-cpp INTERFACE include)
+add_library(slick::coinbase-advanced-cpp ALIAS coinbase-advanced-cpp)
+target_include_directories(coinbase-advanced-cpp INTERFACE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+)
 target_link_libraries(coinbase-advanced-cpp INTERFACE slick::net jwt-cpp::jwt-cpp)
 target_precompile_headers(coinbase-advanced-cpp INTERFACE 
     <nlohmann/json.hpp>
@@ -86,5 +88,40 @@ if (BUILD_COINBASE_ADVANCED_TESTS)
 else()
     message(STATUS "Skipping coinbase-advanced-cpp tests")
 endif()
+
+# Installation rules
+install(DIRECTORY include/ DESTINATION include)
+
+# Install CMake package configuration files for vcpkg
+install(TARGETS coinbase-advanced-cpp EXPORT coinbase-advanced-cppTargets)
+
+install(EXPORT coinbase-advanced-cppTargets
+    FILE coinbase-advanced-cppTargets.cmake
+    NAMESPACE slick::
+    DESTINATION lib/cmake/coinbase-advanced-cpp
+)
+
+include(CMakePackageConfigHelpers)
+
+# Generate the config file
+configure_package_config_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/cmake/coinbase-advanced-cppConfig.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/coinbase-advanced-cppConfig.cmake
+    INSTALL_DESTINATION lib/cmake/coinbase-advanced-cpp
+)
+
+# Generate version file
+write_basic_package_version_file(
+    ${CMAKE_CURRENT_BINARY_DIR}/coinbase-advanced-cppConfigVersion.cmake
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+
+# Install config files
+install(FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/coinbase-advanced-cppConfig.cmake
+    ${CMAKE_CURRENT_BINARY_DIR}/coinbase-advanced-cppConfigVersion.cmake
+    DESTINATION lib/cmake/coinbase-advanced-cpp
+)
 
 message(STATUS "coinbase-advance-cpp: ${PROJECT_VERSION}")
