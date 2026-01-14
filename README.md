@@ -1,5 +1,11 @@
 # Coinbase Advanced API C++ SDK
 
+[![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.cppreference.com/w/cpp/20)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Header-only](https://img.shields.io/badge/header--only-yes-brightgreen.svg)](#installation)
+[![Lock-free](https://img.shields.io/badge/concurrency-lock--free-orange.svg)](#architecture)
+[![GitHub release](https://img.shields.io/github/v/release/SlickQuant/slick-logger)](https://github.com/SlickQuant/slick-logger/releases)
+
 A modern C++ SDK for interacting with the Coinbase Advanced API, providing both REST and WebSocket functionality for trading, market data, and account management.
 
 ## Features
@@ -47,6 +53,7 @@ include/coinbase/
 - nlohmann/json (JSON library)
 - jwt-cpp (JSON Web Token library)
 - slick-net (networking library - automatically fetched via CMake)
+- vcpkg (optional, dependency management)
 
 ### Building
 
@@ -55,6 +62,16 @@ mkdir build
 cd build
 cmake ..
 cmake --build .
+```
+
+### Using vcpkg (optional)
+
+This repo includes a `vcpkg.json` manifest. If you use vcpkg, dependencies are installed automatically via the toolchain file. If a vcpkg port for `slick-net` is available, it will be used; otherwise CMake falls back to FetchContent.
+
+```bash
+cmake -S . -B build \
+  -DCMAKE_TOOLCHAIN_FILE=C:/path/to/vcpkg/scripts/buildsystems/vcpkg.cmake
+cmake --build build
 ```
 
 ### Usage

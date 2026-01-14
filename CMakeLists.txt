@@ -14,19 +14,26 @@ if (CMAKE_BUILD_TYPE MATCHES Release)
     add_definitions(-DNDEBUG)
 endif()
 
-find_package(nlohmann_json REQUIRED)
-find_package(OpenSSL REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
+find_package(OpenSSL CONFIG REQUIRED)
 find_package(jwt-cpp CONFIG REQUIRED)
 
-include(FetchContent)
-set(BUILD_SLICK_NET_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(BUILD_SLICK_NET_TESTS OFF CACHE BOOL "" FORCE)
-FetchContent_Declare(
-    slick-net
-    GIT_REPOSITORY https://github.com/SlickQuant/slick-net.git
-    GIT_TAG v1.2.2
-)
-FetchContent_MakeAvailable(slick-net)
+find_package(slick-net 1.2.2 CONFIG QUIET)
+
+if (NOT slick-net_FOUND)
+    message(STATUS "fetching slick-net...")
+    include(FetchContent)
+    if (NOT TARGET slick::net)
+        set(BUILD_SLICK_NET_EXAMPLES OFF CACHE BOOL "" FORCE)
+        set(BUILD_SLICK_NET_TESTS OFF CACHE BOOL "" FORCE)
+        FetchContent_Declare(
+            slick-net
+            GIT_REPOSITORY https://github.com/SlickQuant/slick-net.git
+            GIT_TAG v1.2.2
+        )
+        FetchContent_MakeAvailable(slick-net)
+    endif()
+endif()
 
 add_library(coinbase-advanced-cpp INTERFACE)
 target_include_directories(coinbase-advanced-cpp INTERFACE include)
