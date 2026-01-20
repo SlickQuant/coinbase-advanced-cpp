@@ -96,7 +96,6 @@ struct UserThreadWebsocketCallbacks : public WebsocketCallbacks
 
 private:
     friend class WebSocketClient;
-    WebSocketClient* client_ = nullptr;
     slick::SlickQueue<char> data_queue_;
     uint64_t read_cursor_ = 0;
 };
@@ -161,13 +160,14 @@ private:
 inline void UserThreadWebsocketCallbacks::processData() {
     auto [data_ptr, data_size] = data_queue_.read(read_cursor_);
     if (data_ptr && data_size > 0) {
-        char channel = data_ptr[0];
-        ++data_ptr;
+        WebSocketClient* client = *reinterpret_cast<WebSocketClient**>(data_ptr);
+        char channel = data_ptr[sizeof(WebSocketClient*)];
+        data_ptr += sizeof(WebSocketClient*) + 1;
         if (channel == 'U') {
-            client_->processUserData(data_ptr, data_size - 1);
+            client->processUserData(data_ptr, data_size - 1);
         }
         else {
-            client_->processMarketData(data_ptr, data_size - 1);
+            client->processMarketData(data_ptr, data_size - 1);
         }
     }
 }
@@ -195,7 +195,6 @@ inline WebSocketClient::WebSocketClient(
     , user_thread_callbacks_(dynamic_cast<UserThreadWebsocketCallbacks*>(callbacks))
 {
     if (user_thread_callbacks_) {
-        user_thread_callbacks_->client_ = this;
         data_queue_ = &user_thread_callbacks_->data_queue_;
     }
 }
@@ -286,10 +285,11 @@ inline void WebSocketClient::logData(std::string_view data_file, uint32_t data_q
 
 inline void WebSocketClient::dispatchData(const char* data, std::size_t size, char channel) {
     assert(data_queue_);
-    auto sz = size + 1;
+    auto sz = sizeof(WebSocketClient*) + size + 1;
     auto index = data_queue_->reserve(sz);
-    *(*data_queue_)[index] = channel;
-    std::memcpy((*data_queue_)[index + 1], data, size);
+    *reinterpret_cast<WebSocketClient**>((*data_queue_)[index]) = this;
+    *(*data_queue_)[index + sizeof(WebSocketClient*)] = channel;
+    std::memcpy((*data_queue_)[index + sizeof(WebSocketClient*) + 1], data, size);
     data_queue_->publish(index, sz);
 }
 

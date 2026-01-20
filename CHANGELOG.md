@@ -5,11 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [] -
+## [unreleased] -
 
 ### Changed
-- Try to find dependent slick components using `find_package` before falling back to `FetchContent`.
+- Try to find dependent slick components using `find_package` before falling back to `FetchContent`
 - Changed header files from .h to .hpp
+- UserThreadWebsocketCallbacks to support multiple WebSocketClient by getting client pointer from dispatched data
 
 ## [0.1.0] - 2026-01-13 
 
