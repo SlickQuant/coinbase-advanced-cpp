@@ -406,7 +406,7 @@ namespace coinbase::tests {
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
 
-        while (!snapshot_received_.load(std::memory_order_relaxed) < 2) {
+        while (snapshot_received_.load(std::memory_order_relaxed) < 2) {
             processData();
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
