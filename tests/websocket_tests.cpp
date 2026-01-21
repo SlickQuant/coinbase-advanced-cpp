@@ -176,6 +176,9 @@ namespace coinbase::tests {
         void onMarketDataGap() override {
             LOG_INFO("MarketDataGap");
         }
+        void onUserDataGap() override {
+            LOG_INFO("UserDataGap");
+        }
         void onUserDataSnapshot(uint64_t seq_num, const std::vector<Order>& orders, const std::vector<PerpetualFuturePosition>& perpetual_future_positions, const std::vector<ExpiringFuturePosition>& expiring_future_positions) override {
             LOG_INFO("UserDataSnapshot");
             LOG_INFO("SeqNum: {}", seq_num);

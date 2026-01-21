@@ -77,17 +77,45 @@ struct WebsocketCallbacks {
     virtual void onStatusSnapshot(uint64_t seq_num, uint64_t timestamp, const std::vector<Status>& status) = 0;
     virtual void onStatus(uint64_t seq_num, uint64_t timestamp, const std::vector<Status>& status) = 0;
     virtual void onMarketDataGap() = 0;
+    virtual void onUserDataGap() = 0;
     virtual void onUserDataSnapshot(uint64_t seq_num, const std::vector<Order>& orders, const std::vector<PerpetualFuturePosition>& perpetual_future_positions, const std::vector<ExpiringFuturePosition>& expiring_future_positions) = 0;
     virtual void onOrderUpdates(uint64_t seq_num, const std::vector<Order>& orders) = 0;
     virtual void onMarketDataError(std::string err) = 0;
     virtual void onUserDataError(std::string err) = 0;
 };
 
-struct UserThreadWebsocketCallbacks : public WebsocketCallbacks
+struct DataHandler {
+    virtual ~DataHandler() = default;
+
+    bool processMarketData(const char* data, std::size_t size);
+    bool processUserData(const char* data, std::size_t size);
+    void onMarketDataError(std::string err);
+    void onUserDataError(std::string err);
+    bool checkMarketDataSequenceNumber(int64_t seq_num);
+    bool checkUserDataSequenceNumber(int64_t seq_num);
+    void processLevel2Update(const json& j);
+    void processMarketTrades(const json& j);
+    void processCandles(const json& j);
+    void processTicker(const json& j);
+    void processUserEvent(const json& j);
+    bool processHeartbeat(const json& j);
+    void processStatus(const json& j);
+    void processFuturesBalanceSummary(const json& j);
+
+protected:
+    friend class WebSocketClient;
+    WebsocketCallbacks* callbacks_ = nullptr;
+    int64_t last_md_seq_num_ = -1;
+    int64_t last_user_seq_num_ = -1;
+};
+
+struct UserThreadWebsocketCallbacks : public DataHandler, public WebsocketCallbacks
 {
     UserThreadWebsocketCallbacks(uint32_t queue_size = 16777216)
         : data_queue_(queue_size)
-    {}
+    {
+        callbacks_ = this;
+    }
 
     ~UserThreadWebsocketCallbacks() override = default;
     
@@ -116,34 +144,20 @@ public:
 private:
     void onMarketData(const char* data, std::size_t size);
     void onUserData(const char* data, std::size_t size);
-    void processMarketData(const char* data, std::size_t size);
-    void processUserData(const char* data, std::size_t size);
     void onMarketDataError(std::string err);
     void onUserDataError(std::string err);
-    void checkMarketDataSequenceNumber(int64_t seq_num);
-    void checkUserDataSequenceNumber(int64_t seq_num);
     void reconnectMarketData();
     void reconnectUserData();
-    void processLevel2Update(const json& j);
-    void processMarketTrades(const json& j);
-    void processCandles(const json& j);
-    void processTicker(const json& j);
-    void processUserEvent(const json& j);
-    void processHeartbeat(const json& j);
-    void processStatus(const json& j);
-    void processFuturesBalanceSummary(const json& j);
     void dispatchData(const char* data, std::size_t size, char channel);
     void runDataLogger();
 
 private:
     friend class UserThreadWebsocketCallbacks;
-    WebsocketCallbacks *callbacks_;
+    DataHandler* data_handler_ = nullptr;
     std::string market_data_url_;
     std::string user_data_url_;
     std::shared_ptr<Websocket> market_data_websocket_;
     std::shared_ptr<Websocket> user_data_websocket_;
-    int64_t last_md_seq_num_ = -1;
-    int64_t last_user_seq_num_ = -1;
     std::array<std::unordered_set<std::string>, static_cast<uint8_t>(WebSocketChannel::__COUNT__)> product_ids_;
     std::vector<std::string> pending_subscriptions_;
     std::string user_id_;
@@ -160,14 +174,13 @@ private:
 inline void UserThreadWebsocketCallbacks::processData() {
     auto [data_ptr, data_size] = data_queue_.read(read_cursor_);
     if (data_ptr && data_size > 0) {
-        WebSocketClient* client = *reinterpret_cast<WebSocketClient**>(data_ptr);
-        char channel = data_ptr[sizeof(WebSocketClient*)];
-        data_ptr += sizeof(WebSocketClient*) + 1;
+        char channel = data_ptr[0];
+        ++data_ptr;
         if (channel == 'U') {
-            client->processUserData(data_ptr, data_size - 1);
+            processUserData(data_ptr, data_size - 1);
         }
         else {
-            client->processMarketData(data_ptr, data_size - 1);
+            processMarketData(data_ptr, data_size - 1);
         }
     }
 }
@@ -177,8 +190,7 @@ inline WebSocketClient::WebSocketClient(
     WebsocketCallbacks *callbacks,
     std::string_view market_data_url,
     std::string_view user_data_url)
-    : callbacks_(callbacks)
-    , market_data_url_(market_data_url)
+    : market_data_url_(market_data_url)
     , user_data_url_(user_data_url)
     , market_data_websocket_(std::make_shared<Websocket>(
         market_data_url_,
@@ -196,6 +208,11 @@ inline WebSocketClient::WebSocketClient(
 {
     if (user_thread_callbacks_) {
         data_queue_ = &user_thread_callbacks_->data_queue_;
+        data_handler_ = user_thread_callbacks_;
+    }
+    else {
+        data_handler_ = new DataHandler();
+        data_handler_->callbacks_ = callbacks;
     }
 }
 
@@ -219,6 +236,11 @@ inline WebSocketClient::~WebSocketClient() {
     if (data_queue_ && !user_thread_callbacks_) {
         delete data_queue_;
         data_queue_ = nullptr;
+    }
+
+    if (!user_thread_callbacks_) {
+        delete data_handler_;
+        data_handler_ = nullptr;
     }
 }
 
@@ -285,11 +307,11 @@ inline void WebSocketClient::logData(std::string_view data_file, uint32_t data_q
 
 inline void WebSocketClient::dispatchData(const char* data, std::size_t size, char channel) {
     assert(data_queue_);
-    auto sz = sizeof(WebSocketClient*) + size + 1;
+    auto sz = size + 1;
     auto index = data_queue_->reserve(sz);
-    *reinterpret_cast<WebSocketClient**>((*data_queue_)[index]) = this;
-    *(*data_queue_)[index + sizeof(WebSocketClient*)] = channel;
-    std::memcpy((*data_queue_)[index + sizeof(WebSocketClient*) + 1], data, size);
+    auto dest = (*data_queue_)[index];
+    dest[0] = channel;
+    std::memcpy(dest + 1, data, size);
     data_queue_->publish(index, sz);
 }
 
@@ -324,7 +346,11 @@ inline void WebSocketClient::onMarketData(const char* data, std::size_t size) {
         dispatchData(data, size, 'M');
     }
     else {
-        processMarketData(data, size);
+        if (data_handler_->processMarketData(data, size)) {
+            reconnectMarketData();
+        }
+        // If data_queue_ is not nullptr, data logger is enabled.
+        // dispatch data for logging
         if (data_queue_) {
             dispatchData(data, size, 'M');
         }
@@ -336,17 +362,57 @@ inline void WebSocketClient::onUserData(const char* data, std::size_t size) {
         dispatchData(data, size, 'U');
     }
     else {
-        processUserData(data, size);
+        if (data_handler_->processUserData(data, size)) {
+            reconnectUserData();
+        }
+        // If data_queue_ is not nullptr, data logger is enabled.
+        // dispatch data for logging
         if (data_queue_) {
             dispatchData(data, size, 'M');
         }
     }
 }
 
-inline void WebSocketClient::processMarketData(const char* data, std::size_t size) {
+inline void WebSocketClient::reconnectMarketData() {
+    market_data_websocket_->close();
+    market_data_websocket_ = std::make_shared<Websocket>(
+        market_data_url_,
+        [this]() { LOG_INFO("Market data connected"); },
+        [this]() { LOG_INFO("Market data disconnected"); },
+        [this](const char* data, std::size_t size) { onMarketData(data, size); },
+        [this](std::string err) { onMarketDataError(err); });
+    data_handler_->last_md_seq_num_ = -1;
+}
+
+inline void WebSocketClient::reconnectUserData() {
+    user_data_websocket_->close();
+    user_data_websocket_ = std::make_shared<Websocket>(
+        user_data_url_,
+        [this]() { LOG_INFO("User data connected"); },
+        [this]() { LOG_INFO("User data disconnected"); },
+        [this](const char* data, std::size_t size) { onUserData(data, size); },
+        [this](std::string err) { onUserDataError(err); });
+    data_handler_->last_user_seq_num_ = -1;
+}
+
+inline void WebSocketClient::onMarketDataError(std::string err) {
+    LOG_ERROR("market data error: {}", err);
+    data_handler_->callbacks_->onMarketDataError(err);
+    reconnectMarketData();
+}
+
+inline void WebSocketClient::onUserDataError(std::string err) {
+    LOG_ERROR("user data error: {}", err);
+    data_handler_->callbacks_->onUserDataError(err);
+    reconnectUserData();
+}
+
+inline bool DataHandler::processMarketData(const char* data, std::size_t size) {
     try {
         auto j = json::parse(data, data + size);
-        checkMarketDataSequenceNumber(j["sequence_num"]);
+        if (!checkMarketDataSequenceNumber(j["sequence_num"])) {
+            return false;
+        }
         auto channel = j["channel"];
         if (channel == "l2_data") {
             processLevel2Update(j);
@@ -375,12 +441,15 @@ inline void WebSocketClient::processMarketData(const char* data, std::size_t siz
     catch (const std::exception &e) {
         LOG_ERROR("error: {}. data: {}", e.what(), std::string_view(data, size));
     }
+    return true;
 }
 
-inline void WebSocketClient::processUserData(const char* data, std::size_t size) {
+inline bool DataHandler::processUserData(const char* data, std::size_t size) {
     try {
         auto j = json::parse(data, data + size);
-        checkUserDataSequenceNumber(j["sequence_num"]);
+        if (!checkUserDataSequenceNumber(j["sequence_num"])) {
+            return false;
+        }
 
         auto channel = j["channel"];
         if (channel == "user") {
@@ -400,9 +469,10 @@ inline void WebSocketClient::processUserData(const char* data, std::size_t size)
     catch (const std::exception &e) {
         LOG_ERROR("error: {}. data: {}", e.what(), std::string_view(data, size));
     }
+    return true;
 }
 
-inline void WebSocketClient::processLevel2Update(const json &j) {
+inline void DataHandler::processLevel2Update(const json &j) {
     for (const auto &event : j["events"]) {
         if (event["type"] == "snapshot") {
             callbacks_->onLevel2Snapshot(event);
@@ -416,7 +486,7 @@ inline void WebSocketClient::processLevel2Update(const json &j) {
     }
 }
 
-inline void WebSocketClient::processTicker(const json &j) {
+inline void DataHandler::processTicker(const json &j) {
     for (const auto &event : j["events"]) {
         if (event["type"] == "snapshot") {
             callbacks_->onTickerSnapshot(j["sequence_num"].get<uint64_t>(), to_nanoseconds(j["timestamp"]), event["tickers"]);
@@ -430,7 +500,7 @@ inline void WebSocketClient::processTicker(const json &j) {
     }
 }
 
-inline void WebSocketClient::processMarketTrades(const json &j) {
+inline void DataHandler::processMarketTrades(const json &j) {
     for (const auto &event : j["events"]) {
         if (event["type"] == "snapshot") {
             callbacks_->onMarketTradesSnapshot(event["trades"]);
@@ -444,7 +514,7 @@ inline void WebSocketClient::processMarketTrades(const json &j) {
     }
 }
 
-inline void WebSocketClient::processCandles(const json &j) {
+inline void DataHandler::processCandles(const json &j) {
     for (const auto &event : j["events"]) {
         if (event["type"] == "snapshot") {
             callbacks_->onCandlesSnapshot(j["sequence_num"].get<uint64_t>(), to_nanoseconds(j["timestamp"]), event["candles"]);
@@ -458,7 +528,7 @@ inline void WebSocketClient::processCandles(const json &j) {
     }
 }
 
-inline void WebSocketClient::processStatus(const json &j) {
+inline void DataHandler::processStatus(const json &j) {
     for (const auto &event : j["events"]) {
         if (event["type"] == "snapshot") {
             callbacks_->onStatusSnapshot(j["sequence_num"].get<uint64_t>(), to_nanoseconds(j["timestamp"]), event["products"]);
@@ -472,7 +542,7 @@ inline void WebSocketClient::processStatus(const json &j) {
     }
 }
 
-inline void WebSocketClient::processUserEvent(const json &j) {
+inline void DataHandler::processUserEvent(const json &j) {
     for (auto& event : j["events"]) {
         if (event["type"] == "snapshot") {
             auto &positions = event.at("positions");
@@ -492,61 +562,28 @@ inline void WebSocketClient::processUserEvent(const json &j) {
     }
 }
 
-inline void WebSocketClient::processHeartbeat(const json& j) {
-    
+inline bool DataHandler::processHeartbeat(const json& j) {
+    return true;
 }
 
-inline void WebSocketClient::checkMarketDataSequenceNumber(int64_t seq_num) {
+inline bool DataHandler::checkMarketDataSequenceNumber(int64_t seq_num) {
     if (seq_num != last_md_seq_num_ + 1) {
         LOG_ERROR("market data message lost. seq_num: {}, last_md_seq_num: {}", seq_num, last_md_seq_num_);
         callbacks_->onMarketDataGap();
-        reconnectMarketData();
-        return;
+        return false;
     }
-    last_md_seq_num_ = seq_num; 
+    last_md_seq_num_ = seq_num;
+    return true;
 }
 
-inline void WebSocketClient::checkUserDataSequenceNumber(int64_t seq_num) {
+inline bool DataHandler::checkUserDataSequenceNumber(int64_t seq_num) {
     if (seq_num != last_user_seq_num_ + 1) {
         LOG_ERROR("user data message lost. seq_num: {}, last_user_seq_num: {}", seq_num, last_user_seq_num_);
-        reconnectUserData();
-        return;
+        callbacks_->onUserDataGap();
+        return false;
     }
     last_user_seq_num_ = seq_num;
-}
-
-inline void WebSocketClient::reconnectMarketData() {
-    market_data_websocket_->close();
-    market_data_websocket_ = std::make_shared<Websocket>(
-        market_data_url_,
-        [this]() { LOG_INFO("Market data connected"); },
-        [this]() { LOG_INFO("Market data disconnected"); },
-        [this](const char* data, std::size_t size) { onMarketData(data, size); },
-        [this](std::string err) { onMarketDataError(err); });
-    last_md_seq_num_ = -1;
-}
-
-inline void WebSocketClient::reconnectUserData() {
-    user_data_websocket_->close();
-    user_data_websocket_ = std::make_shared<Websocket>(
-        user_data_url_,
-        [this]() { LOG_INFO("User data connected"); },
-        [this]() { LOG_INFO("User data disconnected"); },
-        [this](const char* data, std::size_t size) { onUserData(data, size); },
-        [this](std::string err) { onUserDataError(err); });
-    last_user_seq_num_ = -1;
-}
-
-inline void WebSocketClient::onMarketDataError(std::string err) {
-    LOG_ERROR("market data error: {}", err);
-    callbacks_->onMarketDataError(err);
-    reconnectMarketData();
-}
-
-inline void WebSocketClient::onUserDataError(std::string err) {
-    LOG_ERROR("user data error: {}", err);
-    callbacks_->onUserDataError(err);
-    reconnectUserData();
+    return true;
 }
 
 }  // end namespace coinbase
