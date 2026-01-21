@@ -29,8 +29,9 @@ namespace coinbase::tests {
     class WebSocketT : public ::testing::Test, public CallbacksType {
     protected:
         std::unique_ptr<WebSocketClient> client_;
-        std::atomic_bool snapshot_received_ = 0;
+        std::atomic_uint_fast64_t snapshot_received_ = 0;
         std::atomic_uint_fast64_t update_received_count_ = 0;
+        std::atomic_uint_fast64_t md_gap_count_ = 0;
 
         void SetUp() override {
             client_ = std::make_unique<WebSocketClient>(this);
@@ -44,7 +45,7 @@ namespace coinbase::tests {
         }
 
         void onLevel2Snapshot(const Level2UpdateBatch& snapshot) override {
-            EXPECT_EQ(snapshot.product_id, "BTC-USD");
+            EXPECT_TRUE(snapshot.product_id == "BTC-USD" || snapshot.product_id == "ETH-USD");
             EXPECT_GT(snapshot.updates.size(), 0);
             if (!snapshot.updates.empty()) {
                 EXPECT_EQ(snapshot.updates[0].side, Side::BUY);
@@ -56,10 +57,10 @@ namespace coinbase::tests {
                 EXPECT_GT(snapshot.updates[last_index].new_quantity, 0);
                 EXPECT_GT(snapshot.updates[last_index].price_level, snapshot.updates[0].price_level);
             }
-            snapshot_received_.store(true, std::memory_order_release);
+            ++snapshot_received_;
         }
         void onLevel2Updates(const Level2UpdateBatch& updates) override {
-            EXPECT_EQ(updates.product_id, "BTC-USD");
+            EXPECT_TRUE(updates.product_id == "BTC-USD" || updates.product_id == "ETH-USD");
             EXPECT_GT(updates.updates.size(), 0);
             if (!updates.updates.empty()) {
                 EXPECT_GT(updates.updates[0].price_level, 0);
@@ -74,7 +75,7 @@ namespace coinbase::tests {
                 EXPECT_GT(snapshots[0].price, 0);
                 EXPECT_GT(snapshots[0].size, 0);
             }
-            snapshot_received_.store(true, std::memory_order_release);
+            ++snapshot_received_;
         }
         void onMarketTrades(const std::vector<MarketTrade>& trades) override {
             EXPECT_GT(trades.size(), 0);
@@ -101,10 +102,9 @@ namespace coinbase::tests {
                 EXPECT_GT(tickers[0].best_ask_quantity, 0);
                 EXPECT_GT(tickers[0].price_percent_chg_24_h, -100);
             }
-            snapshot_received_.store(true, std::memory_order_release);
+            ++snapshot_received_;
         }
         void onTickers(uint64_t seq_num, uint64_t timestamp, const std::vector<Ticker>& tickers) override {
-            LOG_INFO("Tickers");
             EXPECT_GT(tickers.size(), 0);
             if (!tickers.empty()) {
                 EXPECT_EQ(tickers[0].product_id, "BTC-USD");
@@ -132,7 +132,7 @@ namespace coinbase::tests {
                 EXPECT_GT(candles[0].close, 0);
                 EXPECT_GT(candles[0].volume, 0);
             }
-            snapshot_received_.store(true, std::memory_order_release);
+            ++snapshot_received_;
         }
         void onCandles(uint64_t seq_num, uint64_t timestamp, const std::vector<Candle>& candles) override {
             EXPECT_GT(candles.size(), 0);
@@ -157,7 +157,7 @@ namespace coinbase::tests {
                 EXPECT_GE(status[0].base_increment, 0);
                 EXPECT_GE(status[0].quote_increment, 0);
             }
-            snapshot_received_.store(true, std::memory_order_release);
+            ++snapshot_received_;
         }
         void onStatus(uint64_t seq_num, uint64_t timestamp, const std::vector<Status>& status) override {
             LOG_INFO("Status");
@@ -175,6 +175,7 @@ namespace coinbase::tests {
         }
         void onMarketDataGap() override {
             LOG_INFO("MarketDataGap");
+            ++md_gap_count_;
         }
         void onUserDataGap() override {
             LOG_INFO("UserDataGap");
@@ -205,7 +206,7 @@ namespace coinbase::tests {
                 LOG_INFO("unrealized_pnl: {}", position.unrealized_pnl);
                 LOG_INFO("entry_price: {}", position.entry_price);
             }
-            snapshot_received_.store(true, std::memory_order_relaxed);
+            ++snapshot_received_;
         }
         void onOrderUpdates(uint64_t seq_num, const std::vector<Order>& orders) override {
             LOG_INFO("OrderUpdates");
@@ -230,7 +231,7 @@ namespace coinbase::tests {
 
     TEST_F(WebSocketTests, Level2Channel) {
         client_->subscribe({"BTC-USD"}, {WebSocketChannel::LEVEL2});
-        while (snapshot_received_.load(std::memory_order_relaxed)) {
+        while (!snapshot_received_.load(std::memory_order_relaxed)) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
 
@@ -241,7 +242,7 @@ namespace coinbase::tests {
 
     TEST_F(WebSocketTests, MarketTradesChannel) {
         client_->subscribe({"BTC-USD"}, {WebSocketChannel::MARKET_TRADES});
-        while (snapshot_received_.load(std::memory_order_relaxed)) {
+        while (!snapshot_received_.load(std::memory_order_relaxed)) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
 
@@ -252,7 +253,7 @@ namespace coinbase::tests {
 
     TEST_F(WebSocketTests, CandlesChannel) {
         client_->subscribe({"BTC-USD"}, {WebSocketChannel::CANDLES});
-        while (snapshot_received_.load(std::memory_order_relaxed)) {
+        while (!snapshot_received_.load(std::memory_order_relaxed)) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
 
@@ -263,7 +264,7 @@ namespace coinbase::tests {
 
     TEST_F(WebSocketTests, TickerChannel) {
         client_->subscribe({"BTC-USD"}, {WebSocketChannel::TICKER});
-        while (snapshot_received_.load(std::memory_order_relaxed)) {
+        while (!snapshot_received_.load(std::memory_order_relaxed)) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
 
@@ -274,7 +275,7 @@ namespace coinbase::tests {
 
     TEST_F(WebSocketTests, StatusChannel) {
         client_->subscribe({"BTC-USD"}, {WebSocketChannel::STATUS});
-        while (snapshot_received_.load(std::memory_order_relaxed)) {
+        while (!snapshot_received_.load(std::memory_order_relaxed)) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
     }
@@ -289,7 +290,7 @@ namespace coinbase::tests {
 
     TEST_F(UserThreadWebSocketTests, Level2Channel) {
         client_->subscribe({"BTC-USD"}, {WebSocketChannel::LEVEL2});
-        while (snapshot_received_.load(std::memory_order_relaxed)) {
+        while (!snapshot_received_.load(std::memory_order_relaxed)) {
             processData();
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
@@ -302,7 +303,7 @@ namespace coinbase::tests {
 
     TEST_F(UserThreadWebSocketTests, MarketTradesChannel) {
         client_->subscribe({"BTC-USD"}, {WebSocketChannel::MARKET_TRADES});
-        while (snapshot_received_.load(std::memory_order_relaxed)) {
+        while (!snapshot_received_.load(std::memory_order_relaxed)) {
             processData();
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
@@ -315,7 +316,7 @@ namespace coinbase::tests {
 
     TEST_F(UserThreadWebSocketTests, CandlesChannel) {
         client_->subscribe({"BTC-USD"}, {WebSocketChannel::CANDLES});
-        while (snapshot_received_.load(std::memory_order_relaxed)) {
+        while (!snapshot_received_.load(std::memory_order_relaxed)) {
             processData();
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
@@ -328,7 +329,7 @@ namespace coinbase::tests {
 
     TEST_F(UserThreadWebSocketTests, TickerChannel) {
         client_->subscribe({"BTC-USD"}, {WebSocketChannel::TICKER});
-        while (snapshot_received_.load(std::memory_order_relaxed)) {
+        while (!snapshot_received_.load(std::memory_order_relaxed)) {
             processData();
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
@@ -341,7 +342,7 @@ namespace coinbase::tests {
 
     TEST_F(UserThreadWebSocketTests, StatusChannel) {
         client_->subscribe({"BTC-USD"}, {WebSocketChannel::STATUS});
-        while (snapshot_received_.load(std::memory_order_relaxed)) {
+        while (!snapshot_received_.load(std::memory_order_relaxed)) {
             processData();
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
@@ -353,7 +354,7 @@ namespace coinbase::tests {
 
         client_->logData("coinbase.log");
         client_->subscribe({"BTC-USD"}, {WebSocketChannel::LEVEL2, WebSocketChannel::USER});
-        while (snapshot_received_.load(std::memory_order_relaxed)) {
+        while (!snapshot_received_.load(std::memory_order_relaxed)) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
 
@@ -374,7 +375,7 @@ namespace coinbase::tests {
 
         client_->logData("coinbase.log");
         client_->subscribe({"BTC-USD"}, {WebSocketChannel::LEVEL2, WebSocketChannel::USER});
-        while (snapshot_received_.load(std::memory_order_relaxed)) {
+        while (!snapshot_received_.load(std::memory_order_relaxed)) {
             processData();
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
@@ -389,5 +390,32 @@ namespace coinbase::tests {
         std::string line;
         EXPECT_TRUE(std::getline(f, line));
         EXPECT_FALSE(line.empty());
+    }
+
+    TEST_F(UserThreadWebSocketTests, MultipleClient) {
+        auto client2 = std::make_unique<WebSocketClient>(this);
+        client_->subscribe({"BTC-USD"}, {WebSocketChannel::LEVEL2});
+        client2->subscribe({"ETH-USD"}, {WebSocketChannel::LEVEL2});
+        while (!snapshot_received_.load(std::memory_order_relaxed)) {
+            processData();
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+
+        while (update_received_count_.load(std::memory_order_relaxed) < 5) {
+            processData();
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+
+        while (!snapshot_received_.load(std::memory_order_relaxed) < 2) {
+            processData();
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+
+        while (update_received_count_.load(std::memory_order_relaxed) < 10) {
+            processData();
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+
+        EXPECT_EQ(md_gap_count_.load(std::memory_order_relaxed), 0u);
     }
 }

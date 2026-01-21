@@ -10,6 +10,9 @@
 #include <array>
 #include <memory>
 #include <fstream>
+#include <atomic>
+#include <thread>
+#include <unordered_map>
 #include <slick/net/websocket.h>
 #include <nlohmann/json.hpp>
 #include <coinbase/market_data.hpp>
@@ -87,12 +90,10 @@ struct WebsocketCallbacks {
 struct DataHandler {
     virtual ~DataHandler() = default;
 
-    bool processMarketData(const char* data, std::size_t size);
-    bool processUserData(const char* data, std::size_t size);
+    bool processMarketData(void *ws_client, const char* data, std::size_t size);
+    bool processUserData(void *ws_client, const char* data, std::size_t size);
     void onMarketDataError(std::string err);
     void onUserDataError(std::string err);
-    bool checkMarketDataSequenceNumber(int64_t seq_num);
-    bool checkUserDataSequenceNumber(int64_t seq_num);
     void processLevel2Update(const json& j);
     void processMarketTrades(const json& j);
     void processCandles(const json& j);
@@ -101,6 +102,15 @@ struct DataHandler {
     bool processHeartbeat(const json& j);
     void processStatus(const json& j);
     void processFuturesBalanceSummary(const json& j);
+    
+    virtual bool checkMarketDataSequenceNumber(void *ws_client, int64_t seq_num);
+    virtual bool checkUserDataSequenceNumber(void *ws_client, int64_t seq_num);
+    virtual void resetMarketDataSequence(void [[maybe_unused]] *ws_client) {
+        last_md_seq_num_ = -1;
+    }
+    virtual void resetUserDataSequence(void [[maybe_unused]] *ws_client) {
+        last_user_seq_num_ = -1;
+    }
 
 protected:
     friend class WebSocketClient;
@@ -123,9 +133,52 @@ struct UserThreadWebsocketCallbacks : public DataHandler, public WebsocketCallba
     void processData();
 
 private:
+    bool checkMarketDataSequenceNumber(void *ws_client, int64_t seq_num) override {
+        auto it = md_seq_nums_.find(ws_client);
+        if (it == md_seq_nums_.end()) [[unlikely]] {
+            it = md_seq_nums_.emplace(ws_client, -1).first;
+        }
+        auto &seq_atomic = it->second;
+        auto last_seq = seq_atomic.load(std::memory_order_acquire);
+        if (seq_num != last_seq + 1) {
+            LOG_ERROR("market data message lost. seq_num: {}, last_md_seq_num: {}", seq_num, last_seq);
+            callbacks_->onMarketDataGap();
+            return false;
+        }
+        seq_atomic.store(seq_num, std::memory_order_release);
+        return true;
+    }
+
+    bool checkUserDataSequenceNumber(void *ws_client, int64_t seq_num) override {
+        auto it = user_seq_nums_.find(ws_client);
+        if (it == user_seq_nums_.end()) [[unlikely]] {
+            it = user_seq_nums_.emplace(ws_client, -1).first;
+        }
+        auto &seq_atomic = it->second;
+        auto last_seq = seq_atomic.load(std::memory_order_acquire);
+        if (seq_num != last_seq + 1) {
+            LOG_ERROR("user data message lost. seq_num: {}, last_user_seq_num: {}", seq_num, last_seq);
+            callbacks_->onUserDataGap();
+            return false;
+        }
+        seq_atomic.store(seq_num, std::memory_order_release);
+        return true;
+    }
+
+    void resetMarketDataSequence(void *ws_client) override {
+        md_seq_nums_[ws_client].store(-1, std::memory_order_release);
+    }
+
+    void resetUserDataSequence(void *ws_client) override {
+        user_seq_nums_[ws_client].store(-1, std::memory_order_release);
+    }
+
+private:
     friend class WebSocketClient;
     slick::SlickQueue<char> data_queue_;
     uint64_t read_cursor_ = 0;
+    std::unordered_map<void*, std::atomic_int_fast64_t> md_seq_nums_;
+    std::unordered_map<void*, std::atomic_int_fast64_t> user_seq_nums_;
 };
 
 
@@ -174,13 +227,15 @@ private:
 inline void UserThreadWebsocketCallbacks::processData() {
     auto [data_ptr, data_size] = data_queue_.read(read_cursor_);
     if (data_ptr && data_size > 0) {
-        char channel = data_ptr[0];
-        ++data_ptr;
+        void* client = nullptr;
+        memcpy(&client, data_ptr, sizeof(void*));
+        char channel = data_ptr[sizeof(void*)];
+        data_ptr += sizeof(void*) + 1;
         if (channel == 'U') {
-            processUserData(data_ptr, data_size - 1);
+            processUserData(client, data_ptr, data_size - sizeof(void*) - 1);
         }
         else {
-            processMarketData(data_ptr, data_size - 1);
+            processMarketData(client, data_ptr, data_size - sizeof(void*) - 1);
         }
     }
 }
@@ -307,11 +362,13 @@ inline void WebSocketClient::logData(std::string_view data_file, uint32_t data_q
 
 inline void WebSocketClient::dispatchData(const char* data, std::size_t size, char channel) {
     assert(data_queue_);
-    auto sz = size + 1;
+    auto sz = sizeof(void*) + size + 1;
     auto index = data_queue_->reserve(sz);
     auto dest = (*data_queue_)[index];
-    dest[0] = channel;
-    std::memcpy(dest + 1, data, size);
+    void *self = this;
+    memcpy(dest, &self, sizeof(void*));
+    dest[sizeof(void*)] = channel;
+    std::memcpy(dest + sizeof(void*) + 1, data, size);
     data_queue_->publish(index, sz);
 }
 
@@ -323,8 +380,8 @@ inline void WebSocketClient::runDataLogger() {
     while (logger_run_.load(std::memory_order_relaxed)) {
         auto [data, size] = data_queue_->read(data_cursor_);
         if (data) {
-            ++data;     // skip channel identifier
-            data_log_.write(data, size - 1);
+            data += sizeof(void*) + 1;     // skip client and channel identifier
+            data_log_.write(data, size - sizeof(void*) - 1);
             data_log_ << std::endl;
         }
     }
@@ -346,7 +403,7 @@ inline void WebSocketClient::onMarketData(const char* data, std::size_t size) {
         dispatchData(data, size, 'M');
     }
     else {
-        if (data_handler_->processMarketData(data, size)) {
+        if (!data_handler_->processMarketData(this, data, size)) {
             reconnectMarketData();
         }
         // If data_queue_ is not nullptr, data logger is enabled.
@@ -362,7 +419,7 @@ inline void WebSocketClient::onUserData(const char* data, std::size_t size) {
         dispatchData(data, size, 'U');
     }
     else {
-        if (data_handler_->processUserData(data, size)) {
+        if (!data_handler_->processUserData(this, data, size)) {
             reconnectUserData();
         }
         // If data_queue_ is not nullptr, data logger is enabled.
@@ -381,7 +438,7 @@ inline void WebSocketClient::reconnectMarketData() {
         [this]() { LOG_INFO("Market data disconnected"); },
         [this](const char* data, std::size_t size) { onMarketData(data, size); },
         [this](std::string err) { onMarketDataError(err); });
-    data_handler_->last_md_seq_num_ = -1;
+    data_handler_->resetMarketDataSequence(this);
 }
 
 inline void WebSocketClient::reconnectUserData() {
@@ -392,7 +449,7 @@ inline void WebSocketClient::reconnectUserData() {
         [this]() { LOG_INFO("User data disconnected"); },
         [this](const char* data, std::size_t size) { onUserData(data, size); },
         [this](std::string err) { onUserDataError(err); });
-    data_handler_->last_user_seq_num_ = -1;
+    data_handler_->resetUserDataSequence(this);
 }
 
 inline void WebSocketClient::onMarketDataError(std::string err) {
@@ -407,10 +464,10 @@ inline void WebSocketClient::onUserDataError(std::string err) {
     reconnectUserData();
 }
 
-inline bool DataHandler::processMarketData(const char* data, std::size_t size) {
+inline bool DataHandler::processMarketData(void *ws_client, const char* data, std::size_t size) {
     try {
         auto j = json::parse(data, data + size);
-        if (!checkMarketDataSequenceNumber(j["sequence_num"])) {
+        if (!checkMarketDataSequenceNumber(ws_client, j["sequence_num"])) {
             return false;
         }
         auto channel = j["channel"];
@@ -444,10 +501,10 @@ inline bool DataHandler::processMarketData(const char* data, std::size_t size) {
     return true;
 }
 
-inline bool DataHandler::processUserData(const char* data, std::size_t size) {
+inline bool DataHandler::processUserData(void *ws_client, const char* data, std::size_t size) {
     try {
         auto j = json::parse(data, data + size);
-        if (!checkUserDataSequenceNumber(j["sequence_num"])) {
+        if (!checkUserDataSequenceNumber(ws_client, j["sequence_num"])) {
             return false;
         }
 
@@ -566,7 +623,7 @@ inline bool DataHandler::processHeartbeat(const json& j) {
     return true;
 }
 
-inline bool DataHandler::checkMarketDataSequenceNumber(int64_t seq_num) {
+inline bool DataHandler::checkMarketDataSequenceNumber([[maybe_unused]] void* client, int64_t seq_num) {
     if (seq_num != last_md_seq_num_ + 1) {
         LOG_ERROR("market data message lost. seq_num: {}, last_md_seq_num: {}", seq_num, last_md_seq_num_);
         callbacks_->onMarketDataGap();
@@ -576,7 +633,7 @@ inline bool DataHandler::checkMarketDataSequenceNumber(int64_t seq_num) {
     return true;
 }
 
-inline bool DataHandler::checkUserDataSequenceNumber(int64_t seq_num) {
+inline bool DataHandler::checkUserDataSequenceNumber([[maybe_unused]] void* client, int64_t seq_num) {
     if (seq_num != last_user_seq_num_ + 1) {
         LOG_ERROR("user data message lost. seq_num: {}, last_user_seq_num: {}", seq_num, last_user_seq_num_);
         callbacks_->onUserDataGap();
