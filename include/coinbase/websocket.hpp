@@ -368,7 +368,7 @@ inline void WebSocketClient::dispatchData(const char* data, std::size_t size, ch
     void *self = this;
     memcpy(dest, &self, sizeof(void*));
     dest[sizeof(void*)] = channel;
-    std::memcpy(dest + sizeof(void*) + 1, data, size);
+    memcpy(dest + sizeof(void*) + 1, data, size);
     data_queue_->publish(index, sz);
 }
 
