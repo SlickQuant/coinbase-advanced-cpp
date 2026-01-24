@@ -190,6 +190,12 @@ public:
         std::string_view user_data_url = "wss://advanced-trade-ws-user.coinbase.com");
     ~WebSocketClient();
 
+    bool isMarketDataConnected() const {
+        return market_data_websocket_ && market_data_websocket_->status() == Websocket::Status::CONNECTED;
+    }
+    bool isUserDataConnected() const {
+        return user_data_websocket_ && user_data_websocket_->status() == Websocket::Status::CONNECTED;
+    }
     void subscribe(const std::vector<std::string> &product_ids, const std::vector<WebSocketChannel> &channels);
     void unsubscribe(const std::vector<std::string> &product_ids, const std::vector<WebSocketChannel> &channels);
     void logData(std::string_view data_file, uint32_t queue_size = 16777216);
@@ -247,18 +253,6 @@ inline WebSocketClient::WebSocketClient(
     std::string_view user_data_url)
     : market_data_url_(market_data_url)
     , user_data_url_(user_data_url)
-    , market_data_websocket_(std::make_shared<Websocket>(
-        market_data_url_,
-        [this]() { LOG_INFO("Market data connected"); },
-        [this]() { LOG_INFO("Market data disconnected"); },
-        [this](const char* data, std::size_t size) { onMarketData(data, size); },
-        [this](std::string err) { onMarketDataError(err); }))
-    , user_data_websocket_(std::make_shared<Websocket>(
-        user_data_url_, 
-        [this]() { LOG_INFO("User data connected"); },
-        [this]() { LOG_INFO("User data disconnected"); },
-        [this](const char* data, std::size_t size) { onUserData(data, size); },
-        [this](std::string err) { onUserDataError(err); }))
     , user_thread_callbacks_(dynamic_cast<UserThreadWebsocketCallbacks*>(callbacks))
 {
     if (user_thread_callbacks_) {
@@ -268,6 +262,26 @@ inline WebSocketClient::WebSocketClient(
     else {
         data_handler_ = new DataHandler();
         data_handler_->callbacks_ = callbacks;
+    }
+
+    if (!market_data_url.empty()) {
+        market_data_websocket_ = std::make_shared<Websocket>(
+            market_data_url_,
+            [this]() { LOG_INFO("Market data connected"); },
+            [this]() { LOG_INFO("Market data disconnected"); },
+            [this](const char* data, std::size_t size) { onMarketData(data, size); },
+            [this](std::string err) { onMarketDataError(err); }
+        );
+    }
+
+    if (!user_data_url.empty()) {
+        user_data_websocket_ = std::make_shared<Websocket>(
+            user_data_url_,
+            [this]() { LOG_INFO("User data connected"); },
+            [this]() { LOG_INFO("User data disconnected"); },
+            [this](const char* data, std::size_t size) { onUserData(data, size); },
+            [this](std::string err) { onUserDataError(err); }
+        );
     }
 }
 
@@ -311,16 +325,22 @@ inline void WebSocketClient::subscribe(const std::vector<std::string> &product_i
         else {
             websocket = market_data_websocket_;
         }
+
+        if (websocket == nullptr) {
+            LOG_WARN("WebSocket for channel {} is not initialized.", to_string(channel));
+            continue;
+        }
+
         if (websocket->status() > Websocket::Status::CONNECTED) {
             websocket->open();
         }
         auto subscribe_str = subscribe_json.dump();
         websocket->send(subscribe_str.c_str(), subscribe_str.size());
-        if (channel == WebSocketChannel::HEARTBEAT) {
-            if (market_data_websocket_->status() > Websocket::Status::CONNECTED) {
-                market_data_websocket_->open();
+        if (channel == WebSocketChannel::HEARTBEAT && user_data_websocket_) {
+            if (user_data_websocket_->status() > Websocket::Status::CONNECTED) {
+                user_data_websocket_->open();
             }
-            market_data_websocket_->send(subscribe_str.c_str(), subscribe_str.size());
+            user_data_websocket_->send(subscribe_str.c_str(), subscribe_str.size());
         }
     }
 }
@@ -330,12 +350,16 @@ inline void WebSocketClient::unsubscribe(const std::vector<std::string> &product
         auto websocket = channel == WebSocketChannel::USER ? user_data_websocket_ : market_data_websocket_;
         auto unsubscribe_json = json{{"type", "unsubscribe"}, {"product_ids", product_ids}, {"channel", to_string(channel)}};
         auto unsubscribe_str = unsubscribe_json.dump();
+        if (websocket == nullptr) {
+            LOG_WARN("WebSocket for channel {} is not initialized.", to_string(channel));
+            continue;
+        }
         if (websocket->status() > Websocket::Status::CONNECTED) {
             websocket->send(unsubscribe_str.c_str(), unsubscribe_str.size());
         }
         if (channel == WebSocketChannel::HEARTBEAT) {
-            if (market_data_websocket_->status() > Websocket::Status::CONNECTED) {
-                market_data_websocket_->send(unsubscribe_str.c_str(), unsubscribe_str.size());
+            if (user_data_websocket_ && user_data_websocket_->status() > Websocket::Status::CONNECTED) {
+                user_data_websocket_->send(unsubscribe_str.c_str(), unsubscribe_str.size());
             }
         }
     }

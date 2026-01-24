@@ -10,11 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - DataHandler class to process Coinbase market and user data
 - Unit test for UserThreadWebsocketCallbacks multiple client support
+- IsMarketDataConnected and IsUserDataConnected methods
 
 ### Changed
 - Try to find dependent slick components using `find_package` before falling back to `FetchContent`
 - Changed header files from .h to .hpp
 - Decoupled UserThreadWebsocketCallbacks from WebSocketeClient to support multiple WebSocketClient
+- Create market data and user data websocket when url is set
 
 ### Fixed
 - Various WebSocket unit tests not waiting for snapshot
