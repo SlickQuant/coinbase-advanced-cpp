@@ -42,30 +42,6 @@ target_include_directories(coinbase-advanced-cpp INTERFACE
 target_link_libraries(coinbase-advanced-cpp INTERFACE slick::net jwt-cpp::jwt-cpp)
 target_precompile_headers(coinbase-advanced-cpp INTERFACE 
     <nlohmann/json.hpp>
-    <atomic>
-    <cstdlib>
-    <functional>
-    <unordered_map>
-    <mutex>
-    <csignal>
-    <thread>
-    # Boost headers
-    <boost/beast/core.hpp>
-    <boost/beast/websocket.hpp>
-    <boost/beast/websocket/ssl.hpp>
-    <boost/beast/http.hpp>
-    <boost/asio/ssl.hpp>
-    <boost/asio/strand.hpp>
-    <boost/asio/awaitable.hpp>
-    <boost/asio/co_spawn.hpp>
-    <boost/asio/signal_set.hpp>
-    <boost/asio/ip/tcp.hpp>
-    <boost/asio/ssl/stream.hpp>
-    <boost/asio/connect.hpp>
-    <boost/asio/post.hpp>
-    <boost/asio/as_tuple.hpp>
-    # External dependencies
-    <slick/queue.h>
 )
 
 if (MSVC)
