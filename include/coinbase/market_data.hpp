@@ -83,26 +83,6 @@ inline void from_json(const json &j, MarketTrade &m) {
     ENUM_FROM_JSON(j, m, side);
 }
 
-struct Candle {
-    uint64_t start;
-    double open;
-    double high;
-    double low;
-    double close;
-    double volume;
-    std::string product_id;
-};
-
-inline void from_json(const json &j, Candle &c) {
-    TIMESTAMP_FROM_JSON(j, c, start);
-    DOUBLE_FROM_JSON(j, c, open);
-    DOUBLE_FROM_JSON(j, c, high);
-    DOUBLE_FROM_JSON(j, c, low);
-    DOUBLE_FROM_JSON(j, c, close);
-    DOUBLE_FROM_JSON(j, c, volume);
-    VARIABLE_FROM_JSON(j, c, product_id);
-}
-
 struct Status {
     ProductType product_type;
     std::string id;
