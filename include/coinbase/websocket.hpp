@@ -106,10 +106,10 @@ struct DataHandler {
     
     virtual bool checkMarketDataSequenceNumber(void *ws_client, int64_t seq_num);
     virtual bool checkUserDataSequenceNumber(void *ws_client, int64_t seq_num);
-    virtual void resetMarketDataSequence(void [[maybe_unused]] *ws_client) {
+    virtual void resetMarketDataSequence([[maybe_unused]] void *ws_client) {
         last_md_seq_num_ = -1;
     }
-    virtual void resetUserDataSequence(void [[maybe_unused]] *ws_client) {
+    virtual void resetUserDataSequence([[maybe_unused]] void *ws_client) {
         last_user_seq_num_ = -1;
     }
 
@@ -387,7 +387,7 @@ inline void WebSocketClient::logData(std::string_view data_file, uint32_t data_q
 
 inline void WebSocketClient::dispatchData(const char* data, std::size_t size, char channel) {
     assert(data_queue_);
-    uint32_t sz = sizeof(void*) + size + 1;
+    auto sz = (uint32_t)(sizeof(void*) + size + 1);
     auto index = data_queue_->reserve(sz);
     auto dest = (*data_queue_)[index];
     void *self = this;
