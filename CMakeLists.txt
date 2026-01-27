@@ -42,6 +42,8 @@ target_include_directories(coinbase-advanced-cpp INTERFACE
 target_link_libraries(coinbase-advanced-cpp INTERFACE slick::net jwt-cpp::jwt-cpp)
 target_precompile_headers(coinbase-advanced-cpp INTERFACE 
     <nlohmann/json.hpp>
+    <slick/net/http.h>
+    <slick/net/websocket.h>
 )
 
 if (MSVC)
