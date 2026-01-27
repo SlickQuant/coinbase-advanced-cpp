@@ -116,15 +116,15 @@ auto cancel_response = client.cancel_orders({"order_id_123"});
 
 class MyCallbacks : public coinbase::WebsocketCallbacks {
 public:
-    void onLevel2Snapshot(const coinbase::Level2UpdateBatch& snapshot) override {
+    void onLevel2Snapshot(uin64_t seq_num, const coinbase::Level2UpdateBatch& snapshot) override {
         // Handle level2 snapshot
     }
     
-    void onLevel2Updates(const coinbase::Level2UpdateBatch& updates) override {
+    void onLevel2Updates(uin64_t seq_num, const coinbase::Level2UpdateBatch& updates) override {
         // Handle level2 updates
     }
     
-    void onMarketTrades(const std::vector<coinbase::MarketTrade>& trades) override {
+    void onMarketTrades(uin64_t seq_num, const std::vector<coinbase::MarketTrade>& trades) override {
         // Handle market trades
     }
     

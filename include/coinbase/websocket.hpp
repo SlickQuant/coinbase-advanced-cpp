@@ -70,10 +70,10 @@ class WebSocketClient;
 
 struct WebsocketCallbacks {
     virtual ~WebsocketCallbacks() = default;
-    virtual void onLevel2Snapshot(const Level2UpdateBatch& snapshot) = 0;
-    virtual void onLevel2Updates(const Level2UpdateBatch& updates) = 0;
-    virtual void onMarketTradesSnapshot(const std::vector<MarketTrade>& snapshots) = 0;
-    virtual void onMarketTrades(const std::vector<MarketTrade>& trades) = 0;
+    virtual void onLevel2Snapshot(uint64_t seq_num, const Level2UpdateBatch& snapshot) = 0;
+    virtual void onLevel2Updates(uint64_t seq_num, const Level2UpdateBatch& updates) = 0;
+    virtual void onMarketTradesSnapshot(uint64_t seq_num, const std::vector<MarketTrade>& snapshots) = 0;
+    virtual void onMarketTrades(uint64_t seq_num, const std::vector<MarketTrade>& trades) = 0;
     virtual void onTickerSnapshot(uint64_t seq_num, uint64_t timestamp, const std::vector<Ticker>& tickers) = 0;
     virtual void onTickers(uint64_t seq_num, uint64_t timestamp, const std::vector<Ticker>& tickers) = 0;
     virtual void onCandlesSnapshot(uint64_t seq_num, uint64_t timestamp, const std::vector<Candle>& candles) = 0;
@@ -555,12 +555,13 @@ inline bool DataHandler::processUserData(void *ws_client, const char* data, std:
 }
 
 inline void DataHandler::processLevel2Update(const json &j) {
+    auto seq_num = j["sequence_num"].get<uint64_t>();
     for (const auto &event : j["events"]) {
         if (event["type"] == "snapshot") {
-            callbacks_->onLevel2Snapshot(event);
+            callbacks_->onLevel2Snapshot(seq_num, event);
         }
         else if (event["type"] == "update") {
-            callbacks_->onLevel2Updates(event);
+            callbacks_->onLevel2Updates(seq_num, event);
         }
         else {
             LOG_WARN("unknown l2_data event type: {}", event["type"].get<std::string_view>());
@@ -569,12 +570,13 @@ inline void DataHandler::processLevel2Update(const json &j) {
 }
 
 inline void DataHandler::processTicker(const json &j) {
+    auto seq_num = j["sequence_num"].get<uint64_t>();
     for (const auto &event : j["events"]) {
         if (event["type"] == "snapshot") {
-            callbacks_->onTickerSnapshot(j["sequence_num"].get<uint64_t>(), to_nanoseconds(j["timestamp"]), event["tickers"]);
+            callbacks_->onTickerSnapshot(seq_num, to_nanoseconds(j["timestamp"]), event["tickers"]);
         }
         else if (event["type"] == "update") {
-            callbacks_->onTickers(j["sequence_num"].get<uint64_t>(), to_nanoseconds(j["timestamp"]), event["tickers"]);
+            callbacks_->onTickers(seq_num, to_nanoseconds(j["timestamp"]), event["tickers"]);
         }
         else {
             LOG_WARN("unknown ticker event type: {}", j["type"].get<std::string_view>());
@@ -583,12 +585,13 @@ inline void DataHandler::processTicker(const json &j) {
 }
 
 inline void DataHandler::processMarketTrades(const json &j) {
+    auto seq_num = j["sequence_num"].get<uint64_t>();
     for (const auto &event : j["events"]) {
         if (event["type"] == "snapshot") {
-            callbacks_->onMarketTradesSnapshot(event["trades"]);
+            callbacks_->onMarketTradesSnapshot(seq_num, event["trades"]);
         }
         else if (event["type"] == "update") {
-            callbacks_->onMarketTrades(event["trades"]);
+            callbacks_->onMarketTrades(seq_num, event["trades"]);
         }
         else {
             LOG_WARN("unknown market_trades event type: {}", event["type"].get<std::string_view>());

@@ -25,7 +25,7 @@ struct Level2Book {
     SideBook<Side::BUY> bids;
     SideBook<Side::SELL> asks;
 
-    void onLevel2Snapshot(const Level2UpdateBatch &batch) {
+    void onLevel2Snapshot(uin64_t seq_num, const Level2UpdateBatch &batch) {
         bids.levels.clear();
         asks.levels.clear();
         for (const auto &update : batch.updates) {
@@ -38,7 +38,7 @@ struct Level2Book {
         last_update_time = batch.updates.back().event_time;
     }
 
-    void onLevel2Updates(const Level2UpdateBatch &batch) {
+    void onLevel2Updates(uin64_t seq_num, const Level2UpdateBatch &batch) {
         for (const auto &update : batch.updates) {
             if (update.event_time <= last_update_time) {
                 LOG_TRACE("{} Skipping update event_time {} <= last_update_time {}", product_id, update.event_time, last_update_time);
@@ -71,7 +71,7 @@ struct Level2Book {
         }
     }
 
-    void onMarketTrades(const std::vector<MarketTrade> &trades) {
+    void onMarketTrades(uin64_t seq_num, const std::vector<MarketTrade> &trades) {
         for (const auto &trade : trades) {
             if (trade.event_time <= last_update_time) {
                 LOG_TRACE("{} Skipping trade event_time {} <= last_update_time {}", product_id, trade.event_time, last_update_time);

@@ -44,7 +44,7 @@ namespace coinbase::tests {
             std::remove("coinbase.log");
         }
 
-        void onLevel2Snapshot(const Level2UpdateBatch& snapshot) override {
+        void onLevel2Snapshot(uint64_t seq_num, const Level2UpdateBatch& snapshot) override {
             EXPECT_TRUE(snapshot.product_id == "BTC-USD" || snapshot.product_id == "ETH-USD");
             EXPECT_GT(snapshot.updates.size(), 0);
             if (!snapshot.updates.empty()) {
@@ -59,7 +59,7 @@ namespace coinbase::tests {
             }
             ++snapshot_received_;
         }
-        void onLevel2Updates(const Level2UpdateBatch& updates) override {
+        void onLevel2Updates(uint64_t seq_num, const Level2UpdateBatch& updates) override {
             EXPECT_TRUE(updates.product_id == "BTC-USD" || updates.product_id == "ETH-USD");
             EXPECT_GT(updates.updates.size(), 0);
             if (!updates.updates.empty()) {
@@ -68,7 +68,7 @@ namespace coinbase::tests {
             }
             ++update_received_count_;
         }
-        void onMarketTradesSnapshot(const std::vector<MarketTrade>& snapshots) override {
+        void onMarketTradesSnapshot(uint64_t seq_num, const std::vector<MarketTrade>& snapshots) override {
             EXPECT_GT(snapshots.size(), 0);
             if (!snapshots.empty()) {
                 EXPECT_EQ(snapshots[0].product_id, "BTC-USD");
@@ -77,7 +77,7 @@ namespace coinbase::tests {
             }
             ++snapshot_received_;
         }
-        void onMarketTrades(const std::vector<MarketTrade>& trades) override {
+        void onMarketTrades(uint64_t seq_num, const std::vector<MarketTrade>& trades) override {
             EXPECT_GT(trades.size(), 0);
             if (!trades.empty()) {
                 EXPECT_EQ(trades[0].product_id, "BTC-USD");
