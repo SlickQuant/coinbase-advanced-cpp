@@ -387,7 +387,7 @@ inline void WebSocketClient::logData(std::string_view data_file, uint32_t data_q
 
 inline void WebSocketClient::dispatchData(const char* data, std::size_t size, char channel) {
     assert(data_queue_);
-    auto sz = sizeof(void*) + size + 1;
+    uint32_t sz = sizeof(void*) + size + 1;
     auto index = data_queue_->reserve(sz);
     auto dest = (*data_queue_)[index];
     void *self = this;
@@ -644,7 +644,7 @@ inline void DataHandler::processUserEvent(const json &j) {
     }
 }
 
-inline bool DataHandler::processHeartbeat(const json& j) {
+inline bool DataHandler::processHeartbeat([[maybe_unused]] const json& j) {
     return true;
 }
 
