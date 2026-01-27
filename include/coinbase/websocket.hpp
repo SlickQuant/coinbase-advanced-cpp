@@ -212,7 +212,7 @@ private:
     void runDataLogger();
 
 private:
-    friend class UserThreadWebsocketCallbacks;
+    friend struct UserThreadWebsocketCallbacks;
     DataHandler* data_handler_ = nullptr;
     std::string market_data_url_;
     std::string user_data_url_;
