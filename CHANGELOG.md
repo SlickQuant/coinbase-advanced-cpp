@@ -17,10 +17,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Changed header files from .h to .hpp
 - Decoupled UserThreadWebsocketCallbacks from WebSocketeClient to support multiple WebSocketClient
 - Create market data and user data websocket when url is set
+- UserThreadWebsocketCallbacks now drains multiple queued messages per tick for higher throughput
+- Propagate precompile headers
+
 
 ### Fixed
 - Various WebSocket unit tests not waiting for snapshot
 - Fixed duplicated Candle definition
+- WebSocket logger now writes correct payload offsets and labels user data correctly
+- Sequence-number checks now accept first message even if the sequence does not start at 0
+- Level2 book compile issues and trade timestamp handling
+- Trades JSON parsing (pass-by-reference)
+- Empty API secret handling in PEM formatting
+- PriceBookResponse parsing when pricebook is missing
+- Order status string typo and size_ratio field name
+- Missing default return in FCM trading session state parsing
 
 ## [0.1.0] - 2026-01-13 
 

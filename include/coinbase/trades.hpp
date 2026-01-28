@@ -25,7 +25,7 @@ struct Trades {
     Side side;
 };
 
-inline void from_json(const json &j, Trades t) {
+inline void from_json(const json &j, Trades &t) {
     VARIABLE_FROM_JSON(j, t, trade_id);
     VARIABLE_FROM_JSON(j, t, product_id);
     VARIABLE_FROM_JSON(j, t, exchange);

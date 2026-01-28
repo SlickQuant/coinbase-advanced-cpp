@@ -6,8 +6,11 @@
 
 #include <string>
 #include <vector>
+#include <map>
+#include <functional>
 #include <nlohmann/json.hpp>
 #include <coinbase/utils.hpp>
+#include <coinbase/market_data.hpp>
 
 using json = nlohmann::json;
 
@@ -21,11 +24,11 @@ struct SideBook {
 
 struct Level2Book {
     std::string product_id;
-    uint64_t last_update_time;
+    uint64_t last_update_time = 0;
     SideBook<Side::BUY> bids;
     SideBook<Side::SELL> asks;
 
-    void onLevel2Snapshot(uin64_t seq_num, const Level2UpdateBatch &batch) {
+    void onLevel2Snapshot(uint64_t seq_num, const Level2UpdateBatch &batch) {
         bids.levels.clear();
         asks.levels.clear();
         for (const auto &update : batch.updates) {
@@ -35,10 +38,12 @@ struct Level2Book {
                 asks.levels.emplace(update.price_level, update.new_quantity);
             }
         }
-        last_update_time = batch.updates.back().event_time;
+        if (!batch.updates.empty()) {
+            last_update_time = batch.updates.back().event_time;
+        }
     }
 
-    void onLevel2Updates(uin64_t seq_num, const Level2UpdateBatch &batch) {
+    void onLevel2Updates(uint64_t seq_num, const Level2UpdateBatch &batch) {
         for (const auto &update : batch.updates) {
             if (update.event_time <= last_update_time) {
                 LOG_TRACE("{} Skipping update event_time {} <= last_update_time {}", product_id, update.event_time, last_update_time);
@@ -71,10 +76,10 @@ struct Level2Book {
         }
     }
 
-    void onMarketTrades(uin64_t seq_num, const std::vector<MarketTrade> &trades) {
+    void onMarketTrades(uint64_t seq_num, const std::vector<MarketTrade> &trades) {
         for (const auto &trade : trades) {
-            if (trade.event_time <= last_update_time) {
-                LOG_TRACE("{} Skipping trade event_time {} <= last_update_time {}", product_id, trade.event_time, last_update_time);
+            if (trade.time <= last_update_time) {
+                LOG_TRACE("{} Skipping trade event_time {} <= last_update_time {}", product_id, trade.time, last_update_time);
                 continue;
             }
             if (trade.side == Side::BUY) {
@@ -94,7 +99,7 @@ struct Level2Book {
                     }
                 }
             }
-            last_update_time = trade.event_time;
+            last_update_time = trade.time;
         }
     }
 };

@@ -131,13 +131,13 @@ struct UserThreadWebsocketCallbacks : public DataHandler, public WebsocketCallba
     ~UserThreadWebsocketCallbacks() override = default;
     
     // Process data in the user thread. Callbacks will be invoked in the user thread.
-    void processData();
+    void processData(uint32_t max_drain_count = 100);
 
 private:
     bool checkMarketDataSequenceNumber(void *ws_client, int64_t seq_num) override {
         auto it = md_seq_nums_.find(ws_client);
         if (it == md_seq_nums_.end()) [[unlikely]] {
-            it = md_seq_nums_.emplace(ws_client, -1).first;
+            it = md_seq_nums_.emplace(ws_client, seq_num - 1).first;
         }
         auto &seq_atomic = it->second;
         auto last_seq = seq_atomic.load(std::memory_order_acquire);
@@ -153,7 +153,7 @@ private:
     bool checkUserDataSequenceNumber(void *ws_client, int64_t seq_num) override {
         auto it = user_seq_nums_.find(ws_client);
         if (it == user_seq_nums_.end()) [[unlikely]] {
-            it = user_seq_nums_.emplace(ws_client, -1).first;
+            it = user_seq_nums_.emplace(ws_client, seq_num - 1).first;
         }
         auto &seq_atomic = it->second;
         auto last_seq = seq_atomic.load(std::memory_order_acquire);
@@ -231,9 +231,13 @@ private:
 
 
 
-inline void UserThreadWebsocketCallbacks::processData() {
-    auto [data_ptr, data_size] = data_queue_.read(read_cursor_);
-    if (data_ptr && data_size > 0) {
+inline void UserThreadWebsocketCallbacks::processData(uint32_t max_drain_count) {
+    uint32_t i = 0;
+    do {
+        auto [data_ptr, data_size] = data_queue_.read(read_cursor_);
+        if (!data_ptr || data_size == 0) {
+            break;
+        }
         void* client = nullptr;
         memcpy(&client, data_ptr, sizeof(void*));
         char channel = data_ptr[sizeof(void*)];
@@ -245,6 +249,7 @@ inline void UserThreadWebsocketCallbacks::processData() {
             processMarketData(client, data_ptr, data_size - sizeof(void*) - 1);
         }
     }
+    while(++i < max_drain_count);
 }
 
 
@@ -417,8 +422,8 @@ inline void WebSocketClient::runDataLogger() {
         if (!data) {
             break;
         }
-        ++data;     // skip channel identifier
-        data_log_.write(data, size - 1);
+        data += sizeof(void*) + 1;     // skip client and channel identifier
+        data_log_.write(data, size - sizeof(void*) - 1);
         data_log_ << std::endl;
     }
 }
@@ -450,7 +455,7 @@ inline void WebSocketClient::onUserData(const char* data, std::size_t size) {
         // If data_queue_ is not nullptr, data logger is enabled.
         // dispatch data for logging
         if (data_queue_) {
-            dispatchData(data, size, 'M');
+            dispatchData(data, size, 'U');
         }
     }
 }
@@ -517,7 +522,7 @@ inline bool DataHandler::processMarketData(void *ws_client, const char* data, st
             processHeartbeat(j);
         }
         else {
-            LOG_ERROR("unknown channel: {}", to_string(channel));
+            LOG_ERROR("unknown channel: {}", channel.is_string() ? channel.get<std::string_view>() : channel.dump());
         }
     }
     catch (const std::exception &e) {
@@ -545,7 +550,7 @@ inline bool DataHandler::processUserData(void *ws_client, const char* data, std:
         else if (channel == "futures_balance_summary") {
         }
         else {
-            LOG_ERROR("unknown channel: {}", to_string(channel));
+            LOG_ERROR("unknown channel: {}", channel.is_string() ? channel.get<std::string_view>() : channel.dump());
         }
     }
     catch (const std::exception &e) {
@@ -652,6 +657,10 @@ inline bool DataHandler::processHeartbeat([[maybe_unused]] const json& j) {
 }
 
 inline bool DataHandler::checkMarketDataSequenceNumber([[maybe_unused]] void* client, int64_t seq_num) {
+    if (last_md_seq_num_ < 0) [[unlikely]] {
+        last_md_seq_num_ = seq_num;
+        return true;
+    }
     if (seq_num != last_md_seq_num_ + 1) {
         LOG_ERROR("market data message lost. seq_num: {}, last_md_seq_num: {}", seq_num, last_md_seq_num_);
         callbacks_->onMarketDataGap();
@@ -662,6 +671,10 @@ inline bool DataHandler::checkMarketDataSequenceNumber([[maybe_unused]] void* cl
 }
 
 inline bool DataHandler::checkUserDataSequenceNumber([[maybe_unused]] void* client, int64_t seq_num) {
+    if (last_user_seq_num_ < 0) [[unlikely]] {
+        last_user_seq_num_ = seq_num;
+        return true;
+    }
     if (seq_num != last_user_seq_num_ + 1) {
         LOG_ERROR("user data message lost. seq_num: {}, last_user_seq_num: {}", seq_num, last_user_seq_num_);
         callbacks_->onUserDataGap();

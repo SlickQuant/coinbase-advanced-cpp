@@ -16,8 +16,11 @@
 namespace coinbase {
 
 inline std::string fix_pem_format(std::string key) {
+    if (key.empty()) {
+        return key;
+    }
     // Remove any quotes that might have been added
-    if (key.front() == '"' && key.back() == '"') {
+    if (key.size() >= 2 && key.front() == '"' && key.back() == '"') {
         key = key.substr(1, key.length() - 2);
     }
     

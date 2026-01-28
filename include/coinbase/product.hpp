@@ -40,7 +40,7 @@ inline FcmTradingSessionState to_fcm_trading_session_state(std::string_view stat
         return FcmTradingSessionState::FCM_TRADING_SESSION_STATE_CLOSE;
     }
 
-    FcmTradingSessionState::FCM_TRADING_SESSION_STATE_UNDEFINED;
+    return FcmTradingSessionState::FCM_TRADING_SESSION_STATE_UNDEFINED;
 }
 
 struct Maintenance {
@@ -152,11 +152,11 @@ inline void from_json(const json &j, FutureProductDetails &d) {
     VARIABLE_FROM_JSON(j, d, twenty_four_by_seven);
 }
 
-struct SettlmentSource {
+struct SettlementSource {
     std::string url;
     std::string name;
 
-    NLOHMANN_DEFINE_TYPE_INTRUSIVE(SettlmentSource, url, name)
+    NLOHMANN_DEFINE_TYPE_INTRUSIVE(SettlementSource, url, name)
 };
 
 struct PredictionMarketProductDetails {
@@ -181,7 +181,7 @@ struct PredictionMarketProductDetails {
     std::string scope;
     std::string yes_titles;
     std::vector<std::string> prehibitions;
-    std::vector<SettlmentSource> settlement_sources;
+    std::vector<SettlementSource> settlement_sources;
     std::vector<std::string> tags;
     uint64_t contract_expiry;
     uint64_t trade_starting_time;
@@ -213,7 +213,7 @@ inline void from_json(const json &j, PredictionMarketProductDetails &p) {
     VARIABLE_FROM_JSON(j, p, market_cbrn);
     VARIABLE_FROM_JSON(j, p, scope);
     VARIABLE_FROM_JSON(j, p, yes_titles);
-    p.yes_titles = j["prehibitions"];
+    p.prehibitions = j["prehibitions"];
     p.settlement_sources = j["settlement_sources"];
     p.tags = j["tags"];
     TIMESTAMP_FROM_JSON(j, p, contract_expiry);
@@ -287,11 +287,11 @@ struct Product {
     bool limit_only;
     bool post_only;
     bool trading_disabled;
-    bool aution_mode;
+    bool auction_mode;
     bool view_only;
     FcmTradingSessionDetails fcm_trading_session_details;
     FutureProductDetails future_product_details;
-    EquityProductDetails equity_project_details;
+    EquityProductDetails equity_product_details;
 };
 
 inline void from_json(const json& j, Product& p) {

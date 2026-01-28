@@ -71,7 +71,6 @@ struct PriceBookResponse {
 
 inline void from_json(const json &j, PriceBookResponse &b) {
     STRUCT_FROM_JSON(j, b, pricebook);
-    b.pricebook = j["pricebook"];
     DOUBLE_FROM_JSON(j, b, last);
     DOUBLE_FROM_JSON(j, b, mid_market);
     DOUBLE_FROM_JSON(j, b, spread_bps);

@@ -155,7 +155,7 @@ struct ScaledLimitConfig : public MarketConfig{
     std::string price_distribution;
     std::string size_distribution;
     double size_diff;
-    double size_ration;
+    double size_ratio;
 };
 
 inline void from_json(const json &j, ScaledLimitConfig &c) {
@@ -167,7 +167,7 @@ inline void from_json(const json &j, ScaledLimitConfig &c) {
     VARIABLE_FROM_JSON(j, c, price_distribution);
     VARIABLE_FROM_JSON(j, c, size_distribution);
     DOUBLE_FROM_JSON(j, c, size_diff);
-    DOUBLE_FROM_JSON(j, c, size_ration);
+    DOUBLE_FROM_JSON(j, c, size_ratio);
 }
 
 struct OrderConfiguration {
@@ -317,7 +317,7 @@ inline std::string to_string(OrderStatus status) {
     case OrderStatus::QUEUED:
         return "QUEUED";
     case OrderStatus::CANCEL_QUEUED:
-        return "CANCEL_QUEUEQ";
+        return "CANCEL_QUEUED";
     case OrderStatus::EDIT_QUEUED:
         return "EDIT_QUEUED";
     case OrderStatus::UNKNOWN_ORDER_STATUS:

@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.30)
 
 set(CMAKE_CXX_STANDARD 20)
 
@@ -42,8 +42,12 @@ target_include_directories(coinbase-advanced-cpp INTERFACE
 target_link_libraries(coinbase-advanced-cpp INTERFACE slick::net jwt-cpp::jwt-cpp)
 target_precompile_headers(coinbase-advanced-cpp INTERFACE 
     <nlohmann/json.hpp>
-    <slick/net/http.h>
-    <slick/net/websocket.h>
+    <random>
+    <fstream>
+)
+
+set_target_properties(coinbase-advanced-cpp PROPERTIES 
+    TRANSITIVE_COMPILE_PROPERTIES "PRECOMPILE_HEADERS"
 )
 
 if (MSVC)

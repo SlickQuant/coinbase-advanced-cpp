@@ -149,7 +149,7 @@ inline std::string to_string(double value, Side side, double min_increment) {
 #define DOUBLE_FROM_JSON(j, o, field) o.##field = double_from_json(j, #field)
 #define INT_FROM_JSON(j, o, field) o.##field = int_from_json(j, #field)
 #define VARIABLE_FROM_JSON(j, o, field) if (j.contains(#field)) try { j.at(#field).get_to(o.##field); } catch(const std::exception &e) { LOG_INFO(#field " {}", j.dump()); LOG_ERROR(e.what()); }
-#define BOOL_FROM_JSON(j, o, field) if (!j[#field].is_null() && j[#field].is_string()) { if (j[#field] == "true") o.##field = true; else if (j[#field] == "false") o.##field = false; } else try { j.at(#field).get_to(o.##field); } catch(const std::exception &e) { LOG_INFO(#field " {}", j.dump()); LOG_ERROR(e.what()); }
-#define STRUCT_FROM_JSON(j, o, field) if (!j[#field].is_null()) from_json(j[#field], o.##field)
+#define BOOL_FROM_JSON(j, o, field) if (j.contains(#field) && !j[#field].is_null() && j[#field].is_string()) { if (j[#field] == "true") o.##field = true; else if (j[#field] == "false") o.##field = false; } else try { j.at(#field).get_to(o.##field); } catch(const std::exception &e) { LOG_INFO(#field " {}", j.dump()); LOG_ERROR(e.what()); }
+#define STRUCT_FROM_JSON(j, o, field) if (j.contains(#field) && !j[#field].is_null()) from_json(j[#field], o.##field)
 #define ENUM_FROM_JSON(j, o, field) if (j.contains(#field)) try { o.##field = to_##field(j.at(#field).get<std::string_view>()); } catch(const std::exception &e) { LOG_INFO(#field " {}", j.dump()); LOG_ERROR(e.what()); }
 }   // end namespace coinbase
