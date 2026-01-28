@@ -18,8 +18,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Decoupled UserThreadWebsocketCallbacks from WebSocketeClient to support multiple WebSocketClient
 - Create market data and user data websocket when url is set
 - UserThreadWebsocketCallbacks now drains multiple queued messages per tick for higher throughput
-- Propagate precompile headers
-
 
 ### Fixed
 - Various WebSocket unit tests not waiting for snapshot

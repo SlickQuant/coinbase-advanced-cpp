@@ -46,10 +46,6 @@ target_precompile_headers(coinbase-advanced-cpp INTERFACE
     <fstream>
 )
 
-set_target_properties(coinbase-advanced-cpp PROPERTIES 
-    TRANSITIVE_COMPILE_PROPERTIES "PRECOMPILE_HEADERS"
-)
-
 if (MSVC)
     set(CMAKE_CXX_FLAGS_RELEASE "-O2")
     add_definitions(-D_WIN32_WINNT=0x0A00)
