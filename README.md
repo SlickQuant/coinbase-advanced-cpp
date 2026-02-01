@@ -12,11 +12,14 @@ A modern C++ SDK for interacting with the Coinbase Advanced API, providing both 
 
 - **REST API Support**: Complete implementation of Coinbase Advanced API endpoints for accounts, orders, products, trades, and more
 - **WebSocket Support**: Real-time market data streaming with level2, ticker, market trades, and user data channels
+  - Connection lifecycle callbacks for connect/disconnect events
+  - Per-client sequence number tracking for multiple concurrent connections
+  - Explicit shutdown control with `stop()` method
 - **Comprehensive Order Types**: Support for market, limit, stop limit, bracket, and TWAP orders
 - **Type Safety**: Full C++ type definitions for all API responses with JSON serialization/deserialization
 - **Modern C++**: Uses C++20 features, RAII, smart pointers, and modern C++ best practices
 - **Async/Await Support**: Built-in async support using C++ coroutines
-- **Thread-Safe**: Designed for multi-threaded applications
+- **Thread-Safe**: Designed for multi-threaded applications with lock-free data structures
 
 ## Architecture
 
@@ -111,23 +114,61 @@ auto cancel_response = client.cancel_orders({"order_id_123"});
 
 #### WebSocket Client
 
+The SDK provides two callback mechanisms for handling WebSocket data:
+
+1. **`WebsocketCallbacks`**: Callbacks are invoked directly on the WebSocket thread. Use this for simple applications or when you want immediate processing.
+
+2. **`UserThreadWebsocketCallbacks`**: Callbacks are invoked on your own thread. The WebSocket data is queued in a lock-free queue, and you control when to process it by calling `processData()`. Use this for better control over threading and to avoid blocking the WebSocket thread.
+
+##### Using WebsocketCallbacks (WebSocket Thread)
+
 ```cpp
 #include <coinbase/websocket.h>
 
 class MyCallbacks : public coinbase::WebsocketCallbacks {
 public:
-    void onLevel2Snapshot(uin64_t seq_num, const coinbase::Level2UpdateBatch& snapshot) override {
+    // Connection lifecycle callbacks
+    void onMarketDataConnected(coinbase::WebSocketClient* client) override {
+        // Handle market data connection established
+    }
+
+    void onMarketDataDisconnected(coinbase::WebSocketClient* client) override {
+        // Handle market data disconnection
+    }
+
+    void onUserDataConnected(coinbase::WebSocketClient* client) override {
+        // Handle user data connection established
+    }
+
+    void onUserDataDisconnected(coinbase::WebSocketClient* client) override {
+        // Handle user data disconnection
+    }
+
+    // Data callbacks
+    void onLevel2Snapshot(coinbase::WebSocketClient* client, uint64_t seq_num,
+                          const coinbase::Level2UpdateBatch& snapshot) override {
         // Handle level2 snapshot
     }
-    
-    void onLevel2Updates(uin64_t seq_num, const coinbase::Level2UpdateBatch& updates) override {
+
+    void onLevel2Updates(coinbase::WebSocketClient* client, uint64_t seq_num,
+                         const coinbase::Level2UpdateBatch& updates) override {
         // Handle level2 updates
     }
-    
-    void onMarketTrades(uin64_t seq_num, const std::vector<coinbase::MarketTrade>& trades) override {
+
+    void onMarketTrades(coinbase::WebSocketClient* client, uint64_t seq_num,
+                        const std::vector<coinbase::MarketTrade>& trades) override {
         // Handle market trades
     }
-    
+
+    // Error callbacks
+    void onMarketDataError(coinbase::WebSocketClient* client, std::string&& err) override {
+        // Handle market data errors
+    }
+
+    void onUserDataError(coinbase::WebSocketClient* client, std::string&& err) override {
+        // Handle user data errors
+    }
+
     // ... other callback methods
 };
 
@@ -142,7 +183,56 @@ std::vector<coinbase::WebSocketChannel> channels = {
     coinbase::WebSocketChannel::TICKER
 };
 client.subscribe(product_ids, channels);
+
+// Explicitly stop WebSocket connections when done
+client.stop();
 ```
+
+##### Using UserThreadWebsocketCallbacks (User Thread)
+
+```cpp
+#include <coinbase/websocket.h>
+
+class MyCallbacks : public coinbase::UserThreadWebsocketCallbacks {
+public:
+    // Same callback signatures as WebsocketCallbacks
+    void onMarketDataConnected(coinbase::WebSocketClient* client) override {
+        // Handle market data connection established
+    }
+
+    void onLevel2Snapshot(coinbase::WebSocketClient* client, uint64_t seq_num,
+                          const coinbase::Level2UpdateBatch& snapshot) override {
+        // Handle level2 snapshot
+    }
+
+    // ... other callback methods
+};
+
+// Create callbacks and WebSocket client
+MyCallbacks callbacks;
+coinbase::WebSocketClient client(&callbacks);
+
+// Subscribe to channels
+client.subscribe({"BTC-USD", "ETH-USD"}, {
+    coinbase::WebSocketChannel::LEVEL2,
+    coinbase::WebSocketChannel::TICKER
+});
+
+// In your main loop or dedicated thread, process queued data
+while (running) {
+    // Process up to 100 queued messages per call
+    callbacks.processData(100);
+
+    // Your other application logic here
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+}
+
+client.stop();
+```
+
+**Key Differences:**
+- **`WebsocketCallbacks`**: Immediate processing on WebSocket I/O thread. Simple but can block WebSocket operations if callbacks are slow.
+- **`UserThreadWebsocketCallbacks`**: Deferred processing on your thread. Better performance and control, but requires calling `processData()` regularly. Uses lock-free queues for efficient data transfer between threads.
 
 ## API Endpoints
 

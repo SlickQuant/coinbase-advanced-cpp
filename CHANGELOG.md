@@ -5,12 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [unreleased] -
+## [0.1.1] - 2026-02-01
 
 ### Added
 - DataHandler class to process Coinbase market and user data
 - Unit test for UserThreadWebsocketCallbacks multiple client support
 - IsMarketDataConnected and IsUserDataConnected methods
+- WebSocket connection lifecycle callbacks for market/user data
+- WebSocketClient stop method for explicit shutdown
+- WebSocket test for repeated connect/disconnect cycles
 
 ### Changed
 - Try to find dependent slick components using `find_package` before falling back to `FetchContent`
@@ -18,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Decoupled UserThreadWebsocketCallbacks from WebSocketeClient to support multiple WebSocketClient
 - Create market data and user data websocket when url is set
 - UserThreadWebsocketCallbacks now drains multiple queued messages per tick for higher throughput
+- Updated slick-net to v1.2.3 and report version when found
+- Added stricter warning and release optimization flags for MSVC and non-MSVC builds
+- WebSocketCallbacks now receive WebSocketClient pointers on all events, and error callbacks take rvalue strings
+- WebSocketClient now initializes sockets on subscribe and dispatches connect/disconnect events through the data queue
+- UserThreadWebsocketCallbacks now track per-client sequence numbers and active client sets
 
 ### Fixed
 - Various WebSocket unit tests not waiting for snapshot
@@ -30,6 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PriceBookResponse parsing when pricebook is missing
 - Order status string typo and size_ratio field name
 - Missing default return in FCM trading session state parsing
+- WebSocket teardown now waits briefly for disconnect callbacks and clears per-client sequence state
+- REST API tests now clean up created orders on failures and log API errors for debugging
 
 ## [0.1.0] - 2026-01-13 
 

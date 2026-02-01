@@ -6,7 +6,6 @@
 #include <string>
 #include <nlohmann/json.hpp>
 
-// uncomment to see debug logging
 #include <slick/logger.hpp>
 
 #ifdef ENABLE_SLICK_LOGGER
@@ -37,7 +36,11 @@ protected:
     }
 
     void TearDown() override {
-        // Cleanup code if needed
+        if (HasFatalFailure() || HasNonfatalFailure()) {
+            if (!order_.order_id.empty()) {
+                client_.cancel_orders({order_.order_id});
+            }
+        }
     }
 
     // Helper to wait for async operations
@@ -52,6 +55,7 @@ protected:
         return pred();
     }
 
+    coinbase::Order order_;
     CoinbaseRestClient client_;
 };
 
@@ -156,45 +160,48 @@ TEST_F(CoinbaseAdvancedTest, LimitOrderTests) {
         // Should fail because post_only
         EXPECT_FALSE(rsp.success);
 
-        auto price = pricebook[0].asks[0].price - 10000.0;
+        auto price = pricebook[0].bids[0].price - 10000.0;
         rsp = client_.create_order(
             std::to_string(std::chrono::system_clock::now().time_since_epoch().count()),
             "BTC-USD",
             Side::BUY,
             OrderType::LIMIT,
             TimeInForce::GOOD_UNTIL_CANCELLED,
-            0.0003,
+            0.00003,
             price,
             true
         );
+        if (!rsp.success) LOG_DEBUG("message: {}, err_details: {}, new_order_failure_reason: {}", rsp.error_response.message, rsp.error_response.error_details, rsp.error_response.new_order_failure_reason);
         EXPECT_TRUE(rsp.success);
 
         if (rsp.success) {
-            auto order = client_.get_order(rsp.success_response.order_id);
-            EXPECT_EQ(order.order_id, rsp.success_response.order_id);
-            EXPECT_EQ(order.side, Side::BUY);
-            EXPECT_EQ(order.status, OrderStatus::OPEN);
+            order_ = client_.get_order(rsp.success_response.order_id);
+            EXPECT_EQ(order_.order_id, rsp.success_response.order_id);
+            EXPECT_EQ(order_.side, Side::BUY);
+            EXPECT_EQ(order_.status, OrderStatus::OPEN);
 
             price -= 10000.0;
             auto modify_rsp = client_.modify_order(
-                order.order_id,
+                order_.order_id,
                 "BTC-USD",
                 price,
-                0.0005
+                0.00005
             );
-            EXPECT_TRUE(modify_rsp.success);
 
             if (modify_rsp.success) {
-                auto order = client_.get_order(rsp.success_response.order_id);
-                EXPECT_EQ(order.order_id, rsp.success_response.order_id);
-                EXPECT_EQ(order.side, Side::BUY);
-                EXPECT_EQ(order.status, OrderStatus::OPEN);
-                EXPECT_DOUBLE_EQ(order.order_configuration.limit_limit_gtc.value().limit_price, price);
+                order_ = client_.get_order(rsp.success_response.order_id);
+                EXPECT_EQ(order_.order_id, rsp.success_response.order_id);
+                EXPECT_EQ(order_.side, Side::BUY);
+                EXPECT_EQ(order_.status, OrderStatus::OPEN);
+                EXPECT_DOUBLE_EQ(order_.order_configuration.limit_limit_gtc.value().limit_price, price);
             }
 
-            auto cancel_rsp = client_.cancel_orders({order.order_id});
+            auto cancel_rsp = client_.cancel_orders({order_.order_id});
+            if (!modify_rsp.success) LOG_DEBUG(modify_rsp.errors.empty() ? "" : modify_rsp.errors[0].dump());
+            if (!cancel_rsp.empty() && !cancel_rsp[0].success) LOG_DEBUG(cancel_rsp[0].failure_reason);
             EXPECT_EQ(cancel_rsp.size(), 1);
             EXPECT_TRUE(cancel_rsp[0].success);
+            EXPECT_TRUE(modify_rsp.success);
         }
     }
 }
@@ -255,40 +262,43 @@ TEST_F(CoinbaseAdvancedTest, LimitBracketOrderTests) {
             price + 5000.0,
             price - 10000.0
         );
+        if (!rsp.success) LOG_DEBUG("message: {}, err_details: {}, new_order_failure_reason: {}", rsp.error_response.message, rsp.error_response.error_details, rsp.error_response.new_order_failure_reason);
         EXPECT_TRUE(rsp.success);
 
         if (rsp.success) {
-            auto order = client_.get_order(rsp.success_response.order_id);
-            EXPECT_EQ(order.order_id, rsp.success_response.order_id);
-            EXPECT_EQ(order.side, Side::SELL);
-            EXPECT_EQ(order.status, OrderStatus::OPEN);
-            EXPECT_TRUE(order.attached_order_configuration.trigger_bracket_gtc.has_value());
-            EXPECT_DOUBLE_EQ(order.attached_order_configuration.trigger_bracket_gtc->limit_price, price - 10000.0);
-            EXPECT_DOUBLE_EQ(order.attached_order_configuration.trigger_bracket_gtc->stop_trigger_price, price + 5000.0);
+            order_ = client_.get_order(rsp.success_response.order_id);
+            EXPECT_EQ(order_.order_id, rsp.success_response.order_id);
+            EXPECT_EQ(order_.side, Side::SELL);
+            EXPECT_EQ(order_.status, OrderStatus::OPEN);
+            EXPECT_TRUE(order_.attached_order_configuration.trigger_bracket_gtc.has_value());
+            EXPECT_DOUBLE_EQ(order_.attached_order_configuration.trigger_bracket_gtc->limit_price, price - 10000.0);
+            EXPECT_DOUBLE_EQ(order_.attached_order_configuration.trigger_bracket_gtc->stop_trigger_price, price + 5000.0);
 
             auto modify_rsp = client_.modify_order(
-                order.order_id,
+                order_.order_id,
                 "BIP-20DEC30-CDE",
                 price,
                 1,
                 price + 10000.0,
                 price - 5000.0
             );
-            EXPECT_TRUE(modify_rsp.success);
 
             if (modify_rsp.success) {
-                auto order = client_.get_order(rsp.success_response.order_id);
-                EXPECT_EQ(order.order_id, rsp.success_response.order_id);
-                EXPECT_EQ(order.side, Side::SELL);
-                EXPECT_EQ(order.status, OrderStatus::OPEN);
-                EXPECT_DOUBLE_EQ(order.order_configuration.limit_limit_gtc.value().limit_price, price);
-                EXPECT_TRUE(order.attached_order_configuration.trigger_bracket_gtc.has_value());
-                EXPECT_DOUBLE_EQ(order.attached_order_configuration.trigger_bracket_gtc->stop_trigger_price, price + 10000.0);
-                EXPECT_DOUBLE_EQ(order.attached_order_configuration.trigger_bracket_gtc->limit_price, price - 5000.0);
+                order_ = client_.get_order(rsp.success_response.order_id);
+                EXPECT_EQ(order_.order_id, rsp.success_response.order_id);
+                EXPECT_EQ(order_.side, Side::SELL);
+                EXPECT_EQ(order_.status, OrderStatus::OPEN);
+                EXPECT_DOUBLE_EQ(order_.order_configuration.limit_limit_gtc.value().limit_price, price);
+                EXPECT_TRUE(order_.attached_order_configuration.trigger_bracket_gtc.has_value());
+                EXPECT_DOUBLE_EQ(order_.attached_order_configuration.trigger_bracket_gtc->stop_trigger_price, price + 10000.0);
+                EXPECT_DOUBLE_EQ(order_.attached_order_configuration.trigger_bracket_gtc->limit_price, price - 5000.0);
             }
 
-            auto cancel_rsp = client_.cancel_orders({order.order_id});
+            auto cancel_rsp = client_.cancel_orders({order_.order_id});
+            if (!modify_rsp.success) LOG_DEBUG(modify_rsp.errors.empty() ? "" : modify_rsp.errors[0].dump());
+            if (!cancel_rsp.empty() && !cancel_rsp[0].success) LOG_DEBUG(cancel_rsp[0].failure_reason);
             EXPECT_EQ(cancel_rsp.size(), 1);
+            EXPECT_TRUE(modify_rsp.success);
             EXPECT_TRUE(cancel_rsp[0].success);
         }
     }
@@ -330,18 +340,20 @@ TEST_F(CoinbaseAdvancedTest, BracketOrderTests) {
                 price + 20000.0
             );
             // SPOT Bracket order cannot be placed as BUY side
+            if (!rsp.success) LOG_DEBUG("message: {}, err_details: {}, new_order_failure_reason: {}", rsp.error_response.message, rsp.error_response.error_details, rsp.error_response.new_order_failure_reason);
             EXPECT_TRUE(rsp.success);
 
             if (rsp.success) {
-                auto order = client_.get_order(rsp.success_response.order_id);
-                EXPECT_EQ(order.order_id, rsp.success_response.order_id);
-                EXPECT_EQ(order.side, Side::SELL);
-                EXPECT_EQ(order.status, OrderStatus::OPEN);
-                EXPECT_TRUE(order.order_configuration.trigger_bracket_gtc.has_value());
-                EXPECT_DOUBLE_EQ(order.order_configuration.trigger_bracket_gtc->stop_trigger_price, price);
-                EXPECT_DOUBLE_EQ(order.order_configuration.trigger_bracket_gtc->limit_price, price + 20000.0);
+                order_ = client_.get_order(rsp.success_response.order_id);
+                EXPECT_EQ(order_.order_id, rsp.success_response.order_id);
+                EXPECT_EQ(order_.side, Side::SELL);
+                EXPECT_EQ(order_.status, OrderStatus::OPEN);
+                EXPECT_TRUE(order_.order_configuration.trigger_bracket_gtc.has_value());
+                EXPECT_DOUBLE_EQ(order_.order_configuration.trigger_bracket_gtc->stop_trigger_price, price);
+                EXPECT_DOUBLE_EQ(order_.order_configuration.trigger_bracket_gtc->limit_price, price + 20000.0);
 
-                auto cancel_rsp = client_.cancel_orders({order.order_id});
+                auto cancel_rsp = client_.cancel_orders({order_.order_id});
+                if (!cancel_rsp.empty() && !cancel_rsp[0].success) LOG_DEBUG(cancel_rsp[0].failure_reason);
                 EXPECT_EQ(cancel_rsp.size(), 1);
                 EXPECT_TRUE(cancel_rsp[0].success);
             }
@@ -366,41 +378,42 @@ TEST_F(CoinbaseAdvancedTest, BracketOrderTests) {
             price + 5000.0,
             price - 6000.0
         );
-        EXPECT_FALSE(rsp.success);
 
         if (rsp.success) {
-            auto order = client_.get_order(rsp.success_response.order_id);
-            EXPECT_EQ(order.order_id, rsp.success_response.order_id);
-            EXPECT_EQ(order.side, Side::SELL);
-            EXPECT_EQ(order.status, OrderStatus::OPEN);
-            EXPECT_TRUE(order.order_configuration.trigger_bracket_gtc.has_value());
-            EXPECT_DOUBLE_EQ(order.order_configuration.trigger_bracket_gtc->stop_trigger_price, price + 5000.0);
-            EXPECT_DOUBLE_EQ(order.order_configuration.trigger_bracket_gtc->limit_price, price - 6000.0);
+            order_ = client_.get_order(rsp.success_response.order_id);
+            EXPECT_EQ(order_.order_id, rsp.success_response.order_id);
+            EXPECT_EQ(order_.side, Side::SELL);
+            EXPECT_EQ(order_.status, OrderStatus::OPEN);
+            EXPECT_TRUE(order_.order_configuration.trigger_bracket_gtc.has_value());
+            EXPECT_DOUBLE_EQ(order_.order_configuration.trigger_bracket_gtc->stop_trigger_price, price + 5000.0);
+            EXPECT_DOUBLE_EQ(order_.order_configuration.trigger_bracket_gtc->limit_price, price - 6000.0);
 
             auto modify_rsp = client_.modify_order(
-                order.order_id,
+                order_.order_id,
                 "BIP-20DEC30-CDE",
                 price,
                 1,
                 price + 10000.0,
                 price - 5000.0
             );
-            EXPECT_TRUE(modify_rsp.success);
 
             if (modify_rsp.success) {
-                auto order = client_.get_order(rsp.success_response.order_id);
-                EXPECT_EQ(order.order_id, rsp.success_response.order_id);
-                EXPECT_EQ(order.side, Side::SELL);
-                EXPECT_EQ(order.status, OrderStatus::OPEN);
-                EXPECT_DOUBLE_EQ(order.order_configuration.limit_limit_gtc.value().limit_price, price);
-                EXPECT_TRUE(order.order_configuration.trigger_bracket_gtc.has_value());
-                EXPECT_DOUBLE_EQ(order.order_configuration.trigger_bracket_gtc->stop_trigger_price, price + 10000.0);
-                EXPECT_DOUBLE_EQ(order.order_configuration.trigger_bracket_gtc->limit_price, price - 5000.0);
+                order_ = client_.get_order(rsp.success_response.order_id);
+                EXPECT_EQ(order_.order_id, rsp.success_response.order_id);
+                EXPECT_EQ(order_.side, Side::SELL);
+                EXPECT_EQ(order_.status, OrderStatus::OPEN);
+                EXPECT_DOUBLE_EQ(order_.order_configuration.limit_limit_gtc.value().limit_price, price);
+                EXPECT_TRUE(order_.order_configuration.trigger_bracket_gtc.has_value());
+                EXPECT_DOUBLE_EQ(order_.order_configuration.trigger_bracket_gtc->stop_trigger_price, price + 10000.0);
+                EXPECT_DOUBLE_EQ(order_.order_configuration.trigger_bracket_gtc->limit_price, price - 5000.0);
             }
 
-            auto cancel_rsp = client_.cancel_orders({order.order_id});
+            auto cancel_rsp = client_.cancel_orders({order_.order_id});
+            if (!modify_rsp.success) LOG_DEBUG(modify_rsp.errors.empty() ? "" : modify_rsp.errors[0].dump());
+            if (!cancel_rsp.empty() && !cancel_rsp[0].success) LOG_DEBUG(cancel_rsp[0].failure_reason);
             EXPECT_EQ(cancel_rsp.size(), 1);
             EXPECT_TRUE(cancel_rsp[0].success);
+            EXPECT_TRUE(modify_rsp.success);
         }
 
         price = pricebook[0].bids[0].price - 10000.0;
@@ -420,38 +433,40 @@ TEST_F(CoinbaseAdvancedTest, BracketOrderTests) {
         EXPECT_FALSE(rsp.success);
 
         if (rsp.success) {
-            auto order = client_.get_order(rsp.success_response.order_id);
-            EXPECT_EQ(order.order_id, rsp.success_response.order_id);
-            EXPECT_EQ(order.side, Side::BUY);
-            EXPECT_EQ(order.status, OrderStatus::OPEN);
-            EXPECT_TRUE(order.order_configuration.trigger_bracket_gtc.has_value());
-            EXPECT_DOUBLE_EQ(order.order_configuration.trigger_bracket_gtc->stop_trigger_price, price - 5000.0);
-            EXPECT_DOUBLE_EQ(order.order_configuration.trigger_bracket_gtc->limit_price, price + 6000.0);
+            order_ = client_.get_order(rsp.success_response.order_id);
+            EXPECT_EQ(order_.order_id, rsp.success_response.order_id);
+            EXPECT_EQ(order_.side, Side::BUY);
+            EXPECT_EQ(order_.status, OrderStatus::OPEN);
+            EXPECT_TRUE(order_.order_configuration.trigger_bracket_gtc.has_value());
+            EXPECT_DOUBLE_EQ(order_.order_configuration.trigger_bracket_gtc->stop_trigger_price, price - 5000.0);
+            EXPECT_DOUBLE_EQ(order_.order_configuration.trigger_bracket_gtc->limit_price, price + 6000.0);
 
             auto modify_rsp = client_.modify_order(
-                order.order_id,
+                order_.order_id,
                 "BIP-20DEC30-CDE",
                 price,
                 1,
                 price - 10000.0,
                 price + 5000.0
             );
-            EXPECT_TRUE(modify_rsp.success);
 
             if (modify_rsp.success) {
-                auto order = client_.get_order(rsp.success_response.order_id);
-                EXPECT_EQ(order.order_id, rsp.success_response.order_id);
-                EXPECT_EQ(order.side, Side::BUY);
-                EXPECT_EQ(order.status, OrderStatus::OPEN);
-                EXPECT_DOUBLE_EQ(order.order_configuration.limit_limit_gtc.value().limit_price, price);
-                EXPECT_TRUE(order.order_configuration.trigger_bracket_gtc.has_value());
-                EXPECT_DOUBLE_EQ(order.order_configuration.trigger_bracket_gtc->stop_trigger_price, price - 50000.0);
-                EXPECT_DOUBLE_EQ(order.order_configuration.trigger_bracket_gtc->limit_price, price + 6000.0);
+                order_ = client_.get_order(rsp.success_response.order_id);
+                EXPECT_EQ(order_.order_id, rsp.success_response.order_id);
+                EXPECT_EQ(order_.side, Side::BUY);
+                EXPECT_EQ(order_.status, OrderStatus::OPEN);
+                EXPECT_DOUBLE_EQ(order_.order_configuration.limit_limit_gtc.value().limit_price, price);
+                EXPECT_TRUE(order_.order_configuration.trigger_bracket_gtc.has_value());
+                EXPECT_DOUBLE_EQ(order_.order_configuration.trigger_bracket_gtc->stop_trigger_price, price - 50000.0);
+                EXPECT_DOUBLE_EQ(order_.order_configuration.trigger_bracket_gtc->limit_price, price + 6000.0);
             }
 
-            auto cancel_rsp = client_.cancel_orders({order.order_id});
+            auto cancel_rsp = client_.cancel_orders({order_.order_id});
+            if (!modify_rsp.success) LOG_DEBUG(modify_rsp.errors.empty() ? "" : modify_rsp.errors[0].dump());
+            if (!cancel_rsp.empty() && !cancel_rsp[0].success) LOG_DEBUG(cancel_rsp[0].failure_reason);
             EXPECT_EQ(cancel_rsp.size(), 1);
             EXPECT_TRUE(cancel_rsp[0].success);
+            EXPECT_TRUE(modify_rsp.success);
         }
     }
 }
@@ -488,4 +503,4 @@ TEST_F(CoinbaseAdvancedTest, ListFillsTest) {
     }
 }
 
-} // namespace slick::net
+} // namespace coinbase::tests

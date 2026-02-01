@@ -32,11 +32,15 @@ namespace coinbase::tests {
         std::atomic_uint_fast64_t snapshot_received_ = 0;
         std::atomic_uint_fast64_t update_received_count_ = 0;
         std::atomic_uint_fast64_t md_gap_count_ = 0;
+        std::atomic_uint_fast64_t md_connected_count_ = 0;
+        std::atomic_uint_fast64_t md_disconnected_count_ = 0;
 
         void SetUp() override {
             client_ = std::make_unique<WebSocketClient>(this);
             snapshot_received_ = 0;
             update_received_count_ = 0;
+            md_connected_count_ = 0;
+            md_disconnected_count_ = 0;
         }
 
         void TearDown() override {
@@ -44,7 +48,25 @@ namespace coinbase::tests {
             std::remove("coinbase.log");
         }
 
-        void onLevel2Snapshot(uint64_t seq_num, const Level2UpdateBatch& snapshot) override {
+        void onMarketDataConnected(WebSocketClient *) {
+            ++md_connected_count_;
+            LOG_INFO("MarketData Connected");
+        }
+
+        void onMarketDataDisconnected(WebSocketClient *) {
+            ++md_disconnected_count_;
+            LOG_INFO("MarketData Disconnected");
+        }
+
+        void onUserDataConnected(WebSocketClient *) {
+            LOG_INFO("UserData Connected");
+        }
+
+        void onUserDataDisconnected(WebSocketClient *) {
+            LOG_INFO("UserData Disconnected");
+        }
+
+        void onLevel2Snapshot(WebSocketClient *, uint64_t /* seq_num */, const Level2UpdateBatch& snapshot) override {
             EXPECT_TRUE(snapshot.product_id == "BTC-USD" || snapshot.product_id == "ETH-USD");
             EXPECT_GT(snapshot.updates.size(), 0);
             if (!snapshot.updates.empty()) {
@@ -59,7 +81,7 @@ namespace coinbase::tests {
             }
             ++snapshot_received_;
         }
-        void onLevel2Updates(uint64_t seq_num, const Level2UpdateBatch& updates) override {
+        void onLevel2Updates(WebSocketClient *, uint64_t /* seq_num */, const Level2UpdateBatch& updates) override {
             EXPECT_TRUE(updates.product_id == "BTC-USD" || updates.product_id == "ETH-USD");
             EXPECT_GT(updates.updates.size(), 0);
             if (!updates.updates.empty()) {
@@ -68,7 +90,7 @@ namespace coinbase::tests {
             }
             ++update_received_count_;
         }
-        void onMarketTradesSnapshot(uint64_t seq_num, const std::vector<MarketTrade>& snapshots) override {
+        void onMarketTradesSnapshot(WebSocketClient *, uint64_t /* seq_num */, const std::vector<MarketTrade>& snapshots) override {
             EXPECT_GT(snapshots.size(), 0);
             if (!snapshots.empty()) {
                 EXPECT_EQ(snapshots[0].product_id, "BTC-USD");
@@ -77,7 +99,7 @@ namespace coinbase::tests {
             }
             ++snapshot_received_;
         }
-        void onMarketTrades(uint64_t seq_num, const std::vector<MarketTrade>& trades) override {
+        void onMarketTrades(WebSocketClient *, uint64_t /* seq_num */, const std::vector<MarketTrade>& trades) override {
             EXPECT_GT(trades.size(), 0);
             if (!trades.empty()) {
                 EXPECT_EQ(trades[0].product_id, "BTC-USD");
@@ -86,7 +108,7 @@ namespace coinbase::tests {
             }
             ++update_received_count_;
         }
-        void onTickerSnapshot(uint64_t seq_num, uint64_t timestamp, const std::vector<Ticker>& tickers) override {
+        void onTickerSnapshot(WebSocketClient *, uint64_t /* seq_num */, uint64_t /* timestamp */, const std::vector<Ticker>& tickers) override {
             EXPECT_GT(tickers.size(), 0);
             if (!tickers.empty()) {
                 EXPECT_EQ(tickers[0].product_id, "BTC-USD");
@@ -104,7 +126,7 @@ namespace coinbase::tests {
             }
             ++snapshot_received_;
         }
-        void onTickers(uint64_t seq_num, uint64_t timestamp, const std::vector<Ticker>& tickers) override {
+        void onTickers(WebSocketClient *, uint64_t /* seq_num */, uint64_t /* timestamp */, const std::vector<Ticker>& tickers) override {
             EXPECT_GT(tickers.size(), 0);
             if (!tickers.empty()) {
                 EXPECT_EQ(tickers[0].product_id, "BTC-USD");
@@ -122,7 +144,7 @@ namespace coinbase::tests {
             }
             ++update_received_count_;
         }
-        void onCandlesSnapshot(uint64_t seq_num, uint64_t timestamp, const std::vector<Candle>& candles) override {
+        void onCandlesSnapshot(WebSocketClient *, uint64_t /* seq_num */, uint64_t /* timestamp */, const std::vector<Candle>& candles) override {
             EXPECT_GT(candles.size(), 0);
             if (!candles.empty()) {
                 EXPECT_EQ(candles[0].product_id, "BTC-USD");
@@ -134,7 +156,7 @@ namespace coinbase::tests {
             }
             ++snapshot_received_;
         }
-        void onCandles(uint64_t seq_num, uint64_t timestamp, const std::vector<Candle>& candles) override {
+        void onCandles(WebSocketClient *, uint64_t /* seq_num */, uint64_t /* timestamp */, const std::vector<Candle>& candles) override {
             EXPECT_GT(candles.size(), 0);
             if (!candles.empty()) {
                 EXPECT_EQ(candles[0].product_id, "BTC-USD");
@@ -146,7 +168,7 @@ namespace coinbase::tests {
             }
             ++update_received_count_;
         }
-        void onStatusSnapshot(uint64_t seq_num, uint64_t timestamp, const std::vector<Status>& status) override {
+        void onStatusSnapshot(WebSocketClient *, uint64_t /* seq_num */, uint64_t /* timestamp */, const std::vector<Status>& status) override {
             EXPECT_GT(status.size(), 0);
             if (!status.empty()) {
                 EXPECT_EQ(status[0].id, "BTC-USD");
@@ -159,7 +181,7 @@ namespace coinbase::tests {
             }
             ++snapshot_received_;
         }
-        void onStatus(uint64_t seq_num, uint64_t timestamp, const std::vector<Status>& status) override {
+        void onStatus(WebSocketClient *, uint64_t /* seq_num */, uint64_t /* timestamp */, const std::vector<Status>& status) override {
             LOG_INFO("Status");
             EXPECT_GT(status.size(), 0);
             if (!status.empty()) {
@@ -173,14 +195,14 @@ namespace coinbase::tests {
             }
             ++update_received_count_;
         }
-        void onMarketDataGap() override {
+        void onMarketDataGap(WebSocketClient *) override {
             LOG_INFO("MarketDataGap");
             ++md_gap_count_;
         }
-        void onUserDataGap() override {
+        void onUserDataGap(WebSocketClient *) override {
             LOG_INFO("UserDataGap");
         }
-        void onUserDataSnapshot(uint64_t seq_num, const std::vector<Order>& orders, const std::vector<PerpetualFuturePosition>& perpetual_future_positions, const std::vector<ExpiringFuturePosition>& expiring_future_positions) override {
+        void onUserDataSnapshot(WebSocketClient *, uint64_t seq_num, const std::vector<Order>& orders, const std::vector<PerpetualFuturePosition>& perpetual_future_positions, const std::vector<ExpiringFuturePosition>& expiring_future_positions) override {
             LOG_INFO("UserDataSnapshot");
             LOG_INFO("SeqNum: {}", seq_num);
             LOG_INFO("Orders: {}", orders.size());
@@ -208,14 +230,14 @@ namespace coinbase::tests {
             }
             ++snapshot_received_;
         }
-        void onOrderUpdates(uint64_t seq_num, const std::vector<Order>& orders) override {
+        void onOrderUpdates(WebSocketClient *, uint64_t /* seq_num */, const std::vector<Order>& /* orders */) override {
             LOG_INFO("OrderUpdates");
         }
-        void onMarketDataError(std::string err) override {
-            LOG_INFO("MarketDataError");
+        void onMarketDataError(WebSocketClient *, std::string &&err) override {
+            LOG_ERROR("MarketDataError {}", std::move(err));
         }
-        void onUserDataError(std::string err) override {
-            LOG_INFO("UserDataError");
+        void onUserDataError(WebSocketClient *, std::string &&err) override {
+            LOG_ERROR("UserDataError: {}", std::move(err));
         }
     };
 
@@ -418,4 +440,33 @@ namespace coinbase::tests {
 
         EXPECT_EQ(md_gap_count_.load(std::memory_order_relaxed), 0u);
     }
+
+    TEST_F(WebSocketTests, RepeatedConnectDisconnect) {
+        constexpr int kIterations = 5;
+        for (int i = 0; i < kIterations; ++i) {
+            client_ = std::make_unique<WebSocketClient>(this);
+            auto connected_before = md_connected_count_.load(std::memory_order_relaxed);
+            auto disconnected_before = md_disconnected_count_.load(std::memory_order_relaxed);
+            client_->subscribe({"BTC-USD"}, {WebSocketChannel::LEVEL2});
+            auto start = std::chrono::steady_clock::now();
+            while (md_connected_count_.load(std::memory_order_relaxed) == connected_before &&
+                   (std::chrono::steady_clock::now() - start) < std::chrono::seconds(5)) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
+            const bool connected = md_connected_count_.load(std::memory_order_relaxed) > connected_before;
+            client_.reset();
+            if (connected) {
+                start = std::chrono::steady_clock::now();
+                while (md_disconnected_count_.load(std::memory_order_relaxed) == disconnected_before &&
+                       (std::chrono::steady_clock::now() - start) < std::chrono::seconds(5)) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        }
+        EXPECT_GT(md_connected_count_.load(std::memory_order_relaxed), 0u);
+        EXPECT_EQ(md_connected_count_.load(std::memory_order_relaxed), md_disconnected_count_.load(std::memory_order_relaxed));
+    }
+
 }
+
