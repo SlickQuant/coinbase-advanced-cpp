@@ -9,6 +9,8 @@
 #include <chrono>
 #include <cstdint>
 #include <sstream>
+#include <ctime>
+#include <cstdio>
 #include <nlohmann/json.hpp>
 #include <coinbase/side.hpp>
 
@@ -49,27 +51,57 @@ inline std::string timestamp_to_string(uint64_t timestamp_ms) {
 }
 
 inline uint64_t to_milliseconds(const std::string &iso_str) {
-    std::istringstream iss(iso_str);
-    std::chrono::system_clock::time_point tp;
-    iss >> std::chrono::parse("%FT%T", tp);
-    
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        tp.time_since_epoch()
-    ).count();
-    
-    return static_cast<uint64_t>(ms);
+    // Parse ISO 8601 format: "YYYY-MM-DDTHH:MM:SS.sssZ"
+    std::tm tm = {};
+    int milliseconds = 0;
+
+    // Parse the date and time parts
+    std::sscanf(iso_str.c_str(), "%d-%d-%dT%d:%d:%d.%d",
+                &tm.tm_year, &tm.tm_mon, &tm.tm_mday,
+                &tm.tm_hour, &tm.tm_min, &tm.tm_sec, &milliseconds);
+
+    tm.tm_year -= 1900;  // tm_year is years since 1900
+    tm.tm_mon -= 1;       // tm_mon is 0-11
+    tm.tm_isdst = 0;      // Not daylight saving time
+
+    // Convert to time_t (seconds since epoch, UTC)
+#ifdef _WIN32
+    auto time = _mkgmtime(&tm);
+#else
+    auto time = timegm(&tm);
+#endif
+
+    // Convert to milliseconds and add the fractional part
+    return static_cast<uint64_t>(time) * 1000 + milliseconds;
 }
 
 inline uint64_t to_nanoseconds(const std::string &iso_str) {
-    std::istringstream iss(iso_str);
-    std::chrono::sys_time<std::chrono::nanoseconds> tp;
-    iss >> std::chrono::parse("%FT%T", tp);
-    
-    if (iss.fail()) {
+    // Parse ISO 8601 format: "YYYY-MM-DDTHH:MM:SS.sssssssssZ"
+    std::tm tm = {};
+    int nanoseconds = 0;
+
+    // Parse the date and time parts
+    int parsed = std::sscanf(iso_str.c_str(), "%d-%d-%dT%d:%d:%d.%d",
+                             &tm.tm_year, &tm.tm_mon, &tm.tm_mday,
+                             &tm.tm_hour, &tm.tm_min, &tm.tm_sec, &nanoseconds);
+
+    if (parsed < 6) {
         return 0;
     }
 
-    return tp.time_since_epoch().count();
+    tm.tm_year -= 1900;  // tm_year is years since 1900
+    tm.tm_mon -= 1;       // tm_mon is 0-11
+    tm.tm_isdst = 0;      // Not daylight saving time
+
+    // Convert to time_t (seconds since epoch, UTC)
+#ifdef _WIN32
+    auto time = _mkgmtime(&tm);
+#else
+    auto time = timegm(&tm);
+#endif
+
+    // Convert to nanoseconds and add the fractional part
+    return static_cast<uint64_t>(time) * 1000000000ULL + nanoseconds;
 }
 
 inline uint64_t milliseconds_from_json(const json &j, std::string_view field) {
