@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Cross-platform support for `get_env` utility function (Unix/macOS/Windows)
 
+### Fixed
+- Fix macro definitions to use correct field access syntax
+
 ### Removed
 - Unused `reconnectMarketData` and `reconnectUserData` methods from WebSocket class
 - `level2_book.hpp` header file (functionality integrated elsewhere)
