@@ -312,6 +312,16 @@ inline void UserThreadWebsocketCallbacks::processData(uint32_t max_drain_count) 
                     callbacks_->onUserDataError(client, std::string(data_ptr, data_size - MESSAGE_HEADER_SIZE));
                 }
                 break;
+            case MessageType::MARKET_DATA_GAP:
+                if (md_clients_.contains(client)) {
+                    callbacks_->onMarketDataGap(client);
+                }
+                break;
+            case MessageType::USER_DATA_GAP:
+                if (user_clients_.contains(client)) {
+                    callbacks_->onUserDataGap(client);
+                }
+                break;
         }
     }
     while(++i < max_drain_count);
