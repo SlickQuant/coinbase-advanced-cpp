@@ -233,8 +233,6 @@ private:
     void onUserData(const char* data, std::size_t size);
     void onMarketDataError(std::string &&err);
     void onUserDataError(std::string &&err);
-    void reconnectMarketData();
-    void reconnectUserData();
     void dispatchData(const char* data, std::size_t size, MessageType type);
     void runDataLogger();
 

@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-02-03
+
+### Added
+- Cross-platform support for `get_env` utility function (Unix/macOS/Windows)
+
+### Removed
+- Unused `reconnectMarketData` and `reconnectUserData` methods from WebSocket class
+- `level2_book.hpp` header file (functionality integrated elsewhere)
+
 ## [0.1.1] - 2026-02-01
 
 ### Added
@@ -14,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - WebSocket connection lifecycle callbacks for market/user data
 - WebSocketClient stop method for explicit shutdown
 - WebSocket test for repeated connect/disconnect cycles
+- Test for repeated connect/disconnect scenarios to validate stability
 
 ### Changed
 - Try to find dependent slick components using `find_package` before falling back to `FetchContent`
@@ -26,6 +36,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - WebSocketCallbacks now receive WebSocketClient pointers on all events, and error callbacks take rvalue strings
 - WebSocketClient now initializes sockets on subscribe and dispatches connect/disconnect events through the data queue
 - UserThreadWebsocketCallbacks now track per-client sequence numbers and active client sets
+- Refactored REST API tests to improve order handling and logging
+- Added `order_` member variable to store order details for reuse in tests
+- Enhanced error logging for order creation, modification, and cancellation
+- Adjusted order quantities for better precision in tests
+- Refactored WebSocket tests to include connection and disconnection tracking
 
 ### Fixed
 - Various WebSocket unit tests not waiting for snapshot
@@ -40,6 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Missing default return in FCM trading session state parsing
 - WebSocket teardown now waits briefly for disconnect callbacks and clears per-client sequence state
 - REST API tests now clean up created orders on failures and log API errors for debugging
+- Build warnings across multiple files
 
 ## [0.1.0] - 2026-01-13 
 

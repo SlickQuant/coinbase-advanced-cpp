@@ -17,10 +17,12 @@ using json = nlohmann::json;
 namespace coinbase {
 
 inline std::string get_env(std::string_view name) {
+#ifdef _WIN32
+    // Windows: use getenv_s (secure version)
     size_t size;
     auto err_code = getenv_s(&size, nullptr, 0, name.data());
     std::string value;
-
+    
     if (size > 0) {
         char *buffer = new char[size];  // the size include null terminator
         err_code = getenv_s(&size, buffer, size, name.data());
@@ -30,6 +32,11 @@ inline std::string get_env(std::string_view name) {
         delete[] buffer;
     }
     return value;
+#else
+    // Unix/macOS: use standard getenv
+    const char* value = std::getenv(name.data());
+    return value ? std::string(value) : std::string();
+#endif
 }
 
 inline std::string timestamp_to_string(uint64_t timestamp_ms) {

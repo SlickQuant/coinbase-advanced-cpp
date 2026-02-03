@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.30)
 set(CMAKE_CXX_STANDARD 20)
 
 project(coinbase-advanced-cpp
-    VERSION 0.1.1
+    VERSION 0.1.2
     LANGUAGES CXX)
 
 if (CMAKE_BUILD_TYPE MATCHES Debug)
