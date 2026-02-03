@@ -254,7 +254,7 @@ private:
     std::atomic_int_fast8_t pending_md_socket_close_ = 0;
     std::atomic_int_fast8_t pending_user_socket_close_ = 0;
     uint64_t data_cursor_ = 0;
-    static const char empty_msg = '\0';
+    static inline constexpr char empty_msg = '\0';
 };
 
 constexpr uint32_t MESSAGE_HEADER_SIZE = sizeof(WebSocketClient*) + 1;

@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Use UTC-aware time conversion (`timegm`/`_mkgmtime`) instead of local time (`mktime`) for ISO 8601 timestamp parsing
 - Replace `std::format` with chrono formatters with `strftime` for GCC 14 compatibility in `timestamp_to_string`
 - Fix `std::string_view` to `std::string` conversion in `logData` for `fstream::open` compatibility
+- Fix linker error by making `empty_msg` static member variable `inline constexpr`
 
 ### Removed
 - Unused `reconnectMarketData` and `reconnectUserData` methods from WebSocket class
