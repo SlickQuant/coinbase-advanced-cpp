@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix macro definitions to use correct field access syntax
 - Replace `std::chrono::parse` with cross-platform manual parsing in `to_milliseconds` and `to_nanoseconds` for macOS compatibility
 - Use UTC-aware time conversion (`timegm`/`_mkgmtime`) instead of local time (`mktime`) for ISO 8601 timestamp parsing
+- Replace `std::format` with chrono formatters with `strftime` for GCC 14 compatibility in `timestamp_to_string`
+- Fix `std::string_view` to `std::string` conversion in `logData` for `fstream::open` compatibility
 
 ### Removed
 - Unused `reconnectMarketData` and `reconnectUserData` methods from WebSocket class

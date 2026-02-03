@@ -42,12 +42,27 @@ inline std::string get_env(std::string_view name) {
 }
 
 inline std::string timestamp_to_string(uint64_t timestamp_ms) {
-    auto tp = std::chrono::system_clock::time_point{
-        std::chrono::milliseconds{timestamp_ms}
-    };
-    return std::format("{:%FT%T}.{:03}Z",
-        std::chrono::floor<std::chrono::seconds>(tp),
-        timestamp_ms % 1000);
+    // Convert milliseconds to seconds
+    std::time_t seconds = timestamp_ms / 1000;
+    int milliseconds = timestamp_ms % 1000;
+
+    // Convert to tm struct (UTC)
+    std::tm tm;
+#ifdef _WIN32
+    gmtime_s(&tm, &seconds);
+#else
+    gmtime_r(&seconds, &tm);
+#endif
+
+    // Format: YYYY-MM-DDTHH:MM:SS.mmmZ
+    char buffer[32];
+    std::strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%S", &tm);
+
+    // Append milliseconds
+    char result[32];
+    std::snprintf(result, sizeof(result), "%s.%03dZ", buffer, milliseconds);
+
+    return std::string(result);
 }
 
 inline uint64_t to_milliseconds(const std::string &iso_str) {
