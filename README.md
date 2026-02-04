@@ -32,7 +32,6 @@ include/coinbase/
 ├── candle.h           # Candlestick data
 ├── common.h           # Common types and enums
 ├── fill.h             # Fill data
-├── level2_book.h      # Level2 order book
 ├── market_data.h      # Market data structures
 ├── order.h            # Order management
 ├── position.h         # Position management
