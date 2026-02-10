@@ -34,7 +34,7 @@ endif()
 
 include(GoogleTest)
 
-add_executable(coinbase_advance_tests rest_api_tests.cpp websocket_tests.cpp)
+add_executable(coinbase_advance_tests rest_api_tests.cpp websocket_tests.cpp rest_awaitable_tests.cpp)
 target_include_directories(coinbase_advance_tests PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(coinbase_advance_tests PRIVATE coinbase-advanced-cpp slick::net GTest::gtest_main)
 

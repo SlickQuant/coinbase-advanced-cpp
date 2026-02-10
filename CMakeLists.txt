@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.20)
 set(CMAKE_CXX_STANDARD 20)
 
 project(coinbase-advanced-cpp
-    VERSION 0.1.2
+    VERSION 0.1.3
     LANGUAGES CXX)
 
 if (CMAKE_BUILD_TYPE MATCHES Debug)
@@ -18,7 +18,7 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(OpenSSL CONFIG REQUIRED)
 find_package(jwt-cpp CONFIG REQUIRED)
 
-find_package(slick-net 1.2.2 CONFIG QUIET)
+find_package(slick-net 1.2.4 CONFIG QUIET)
 if (NOT slick-net_FOUND)
     message(STATUS "fetching slick-net...")
     include(FetchContent)
@@ -27,32 +27,41 @@ if (NOT slick-net_FOUND)
     FetchContent_Declare(
         slick-net
         GIT_REPOSITORY https://github.com/SlickQuant/slick-net.git
-        GIT_TAG v1.2.3
+        GIT_TAG v1.2.4
     )
     FetchContent_MakeAvailable(slick-net)
 else()
     message(STATUS "slick-net: ${slick-net_VERSION}")
 endif()
 
-add_library(coinbase-advanced-cpp INTERFACE)
+add_library(coinbase-advanced-cpp STATIC
+    src/auth.cpp
+    src/rest.cpp
+    src/rest_awaitable.cpp
+    src/websocket.cpp
+    src/utils.cpp
+)
 add_library(slick::coinbase-advanced-cpp ALIAS coinbase-advanced-cpp)
-target_include_directories(coinbase-advanced-cpp INTERFACE
+target_include_directories(coinbase-advanced-cpp PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
-target_link_libraries(coinbase-advanced-cpp INTERFACE slick::net jwt-cpp::jwt-cpp)
-target_precompile_headers(coinbase-advanced-cpp INTERFACE 
+target_link_libraries(coinbase-advanced-cpp PUBLIC slick::net jwt-cpp::jwt-cpp)
+
+# PRIVATE precompiled headers for faster static library compilation
+target_precompile_headers(coinbase-advanced-cpp PRIVATE
     <nlohmann/json.hpp>
-    <random>
-    <fstream>
+    <string>
+    <vector>
+    <memory>
+    <coroutine>
 )
 
 if (MSVC)
-    set(CMAKE_CXX_FLAGS_RELEASE "-O2")
     add_definitions(-D_WIN32_WINNT=0x0A00)
     set(CMAKE_SUPPRESS_REGENERATION true)   # supress zero_check
     set_target_properties(coinbase-advanced-cpp PROPERTIES LINK_INCREMENTAL ON)
-    target_compile_options(coinbase-advanced-cpp INTERFACE
+    target_compile_options(coinbase-advanced-cpp PRIVATE
         /MP
         /FS
         /bigobj
@@ -62,17 +71,21 @@ if (MSVC)
         $<$<CONFIG:Release>:/GL>  # Whole program optimization
     )
     # Faster linking
-    add_link_options(/DEBUG:FASTLINK)
+    target_link_options(coinbase-advanced-cpp PRIVATE
+        $<$<CONFIG:Debug>:/DEBUG:FASTLINK>
+    )
 else()
-    add_compile_options(
+    target_compile_options(coinbase-advanced-cpp PRIVATE
         -Wall -Wextra -Wpedantic
         $<$<CONFIG:Release>:-O3>
-        $<$<CONFIG:Release>:-march=native>
-        $<$<CONFIG:Release>:-flto>
     )
 endif()
 
-option(BUILD_COINBASE_ADVANCED_TESTS "Build tests" ON)
+set(BUILD_COINBASE_ADVANCED_TESTS_DEFAULT ON)
+if (NOT CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    set(BUILD_COINBASE_ADVANCED_TESTS_DEFAULT OFF)
+endif()
+option(BUILD_COINBASE_ADVANCED_TESTS "Build tests" ${BUILD_COINBASE_ADVANCED_TESTS_DEFAULT})
 if (BUILD_COINBASE_ADVANCED_TESTS)
     message(STATUS "Building coinbase-advanced-cpp tests")
     enable_testing()

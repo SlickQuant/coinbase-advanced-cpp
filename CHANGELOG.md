@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2026-02-09
+
+### Added
+- Comprehensive unit tests for CoinbaseAwaitableRestClient coroutine-based API
+- Tests for all async REST endpoints including accounts, products, orders, fills, and market data
+- Concurrent operations test demonstrating proper async usage
+
+### Changed
+- **BREAKING:** Converted from header-only to static library for significantly faster downstream builds (5-10x improvement)
+- Changed precompiled headers from INTERFACE to PRIVATE (only affects library compilation, not downstream consumers)
+- Simplified dependency management - OpenSSL and slick-net are now bundled in the static library
+- Fixed CoinbaseAwaitableRestClient to use proper Boost.Asio coroutines with `co_return`
+- Changed return type from `std::awaitable` to `asio::awaitable` (Boost.Asio)
+
+### Migration Guide
+Projects using this library must rebuild and reinstall. No source code changes are required in consuming projects, but you must:
+1. Rebuild coinbase-advanced-cpp as a static library
+2. Reinstall to your package manager or install prefix
+3. Rebuild your project (you will see significant compilation speedup)
+
 ## [0.1.2] - 2026-02-03
 
 ### Added

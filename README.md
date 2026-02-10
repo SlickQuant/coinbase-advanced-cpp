@@ -2,7 +2,7 @@
 
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.cppreference.com/w/cpp/20)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Header-only](https://img.shields.io/badge/header--only-yes-brightgreen.svg)](#installation)
+[![Static Library](https://img.shields.io/badge/library-static-brightgreen.svg)](#installation)
 [![Lock-free](https://img.shields.io/badge/concurrency-lock--free-orange.svg)](#architecture)
 [![GitHub release](https://img.shields.io/github/v/release/SlickQuant/slick-logger)](https://github.com/SlickQuant/slick-logger/releases)
 
@@ -63,8 +63,11 @@ include/coinbase/
 mkdir build
 cd build
 cmake ..
-cmake --build .
+cmake --build . --config Release
+cmake --install . --prefix /usr/local  # or your preferred install location
 ```
+
+The library is built as a static library for optimal compilation performance in downstream projects.
 
 ### Using vcpkg (optional)
 
