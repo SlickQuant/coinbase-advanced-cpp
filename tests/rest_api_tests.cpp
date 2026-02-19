@@ -7,22 +7,7 @@
 #include <nlohmann/json.hpp>
 
 #include <slick/logger.hpp>
-
-#ifdef ENABLE_SLICK_LOGGER
-    #ifndef INIT_LOGGER
-    #define INIT_LOGGER
-    namespace {
-        auto *s_logger = []() -> slick::logger::Logger* {
-            auto &logger = slick::logger::Logger::instance();
-            logger.clear_sinks();
-            logger.add_console_sink();
-            // logger.set_level(slick::logger::LogLevel::L_DEBUG);
-            logger.init(1048576, 16777216);
-            return &logger;
-        }();
-    }
-    #endif
-#endif
+#include <coinbase/logging.hpp>
 
 #include <coinbase/rest.hpp>
 
@@ -31,6 +16,20 @@ namespace coinbase::tests {
 // Test fixture for HTTP tests
 class CoinbaseAdvancedTest : public ::testing::Test {
 protected:
+protected:
+    static void SetUpTestSuite() {
+#ifdef ENABLE_SLICK_LOGGER
+        auto &logger = slick::logger::Logger::instance();
+        logger.clear_sinks();
+        logger.add_console_sink();
+        // logger.set_level(slick::logger::LogLevel::L_DEBUG);
+        logger.init(1048576, 16777216);
+        coinbase::logging::set_log_handler([&logger](slick::net::LogLevel level, const char* format_text, std::format_args args){
+            logger.log(static_cast<slick::logger::LogLevel>(level), format_text, args);
+        });
+#endif
+    }
+
     void SetUp() override {
         // Setup code if needed
     }

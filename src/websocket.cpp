@@ -234,9 +234,9 @@ void WebSocketClient::subscribe(const std::vector<std::string> &product_ids, con
                 pending_user_socket_close_.store(0, std::memory_order_release);
 
                 // subscribe heartbeat to keep user channel alive
-                auto heartbeat_sub = json{{"type", "subscribe"}, {"channel", "heartbeat"}};
+                auto heartbeat_sub = json{{"type", "subscribe"}, {"channel", "heartbeats"}};
                 heartbeat_sub["jwt"] = generate_coinbase_jwt(user_data_url_.c_str());
-                auto subscribe_str = subscribe_json.dump();
+                auto subscribe_str = heartbeat_sub.dump();
                 user_data_websocket_->send(subscribe_str.c_str(), subscribe_str.size());
             }
             websocket = user_data_websocket_;
@@ -464,7 +464,7 @@ void DataHandler::processMarketData(WebSocketClient *ws_client, const char* data
         }
         else if (channel == "subscriptions") {
         }
-        else if (channel == "heartbeat") {
+        else if (channel == "heartbeats") {
             processHeartbeat(ws_client, j);
         }
         else {
@@ -486,7 +486,7 @@ void DataHandler::processUserData(WebSocketClient *ws_client, const char* data, 
         }
         else if (channel == "subscriptions") {
         }
-        else if (channel == "heartbeat") {
+        else if (channel == "heartbeats") {
             processHeartbeat(ws_client, j);
         }
         else if (channel == "futures_balance_summary") {

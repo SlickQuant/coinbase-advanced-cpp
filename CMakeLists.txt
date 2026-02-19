@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.20)
 set(CMAKE_CXX_STANDARD 20)
 
 project(coinbase-advanced-cpp
-    VERSION 0.1.3
+    VERSION 0.2.0
     LANGUAGES CXX)
 
 if (CMAKE_BUILD_TYPE MATCHES Debug)
@@ -18,20 +18,18 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(OpenSSL CONFIG REQUIRED)
 find_package(jwt-cpp CONFIG REQUIRED)
 
-find_package(slick-net 1.2.4 CONFIG QUIET)
+find_package(slick-net 2.0.0 CONFIG QUIET)
 if (NOT slick-net_FOUND)
     message(STATUS "fetching slick-net...")
     include(FetchContent)
-    set(BUILD_SLICK_NET_EXAMPLES OFF CACHE BOOL "" FORCE)
-    set(BUILD_SLICK_NET_TESTS OFF CACHE BOOL "" FORCE)
     FetchContent_Declare(
         slick-net
         GIT_REPOSITORY https://github.com/SlickQuant/slick-net.git
-        GIT_TAG v1.2.4
+        GIT_TAG v2.0.0
     )
     FetchContent_MakeAvailable(slick-net)
 else()
-    message(STATUS "slick-net: ${slick-net_VERSION}")
+    message(STATUS "Found slick-net: ${slick-net_VERSION}")
 endif()
 
 add_library(coinbase-advanced-cpp STATIC
@@ -40,6 +38,7 @@ add_library(coinbase-advanced-cpp STATIC
     src/rest_awaitable.cpp
     src/websocket.cpp
     src/utils.cpp
+    src/logging.cpp
 )
 add_library(slick::coinbase-advanced-cpp ALIAS coinbase-advanced-cpp)
 target_include_directories(coinbase-advanced-cpp PUBLIC

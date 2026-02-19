@@ -14,7 +14,7 @@
 #include <thread>
 #include <unordered_map>
 #include <chrono>
-#include <slick/net/websocket.h>
+#include <slick/net/websocket.hpp>
 #include <nlohmann/json.hpp>
 #include <coinbase/market_data.hpp>
 #include <coinbase/order.hpp>

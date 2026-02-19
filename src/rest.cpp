@@ -6,7 +6,7 @@
 #include <coinbase/auth.hpp>
 #include <coinbase/utils.hpp>
 #include <nlohmann/json.hpp>
-#include <slick/net/http.h>
+#include <slick/net/http.hpp>
 #include <format>
 #include <numeric>
 #include <algorithm>
@@ -76,7 +76,7 @@ std::vector<Account> CoinbaseRestClient::list_accounts(const AccountQueryParams 
             auto j = json::parse(res.result_text);
             std::vector<Account> accounts = j["accounts"];
             while (j.contains("has_next") && j["has_next"].get<bool>() && !j["cursor"].get<std::string_view>().empty()) {
-                AccountQueryParams new_params;
+                AccountQueryParams new_params = params;
                 new_params.cursor = j["cursor"].get<std::string_view>();
                 res = Http::get(std::format("{}/api/v3/brokerage/accounts{}", base_url_, new_params()), {
                     {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/accounts", domain_).c_str())}
@@ -190,7 +190,7 @@ std::vector<Order> CoinbaseRestClient::list_orders(const OrderQueryParams &query
             auto j = json::parse(res.result_text);
             std::vector<Order> orders = j["orders"];
             while (j.contains("has_next") && j["has_next"].get<bool>() && !j["cursor"].get<std::string_view>().empty()) {
-                OrderQueryParams new_query;
+                OrderQueryParams new_query = query;
                 new_query.cursor = j["cursor"].get<std::string_view>();
                 res = Http::get(std::format("{}/api/v3/brokerage/orders/historical/batch{}", base_url_, new_query()), {
                     {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/orders/historical/batch", domain_).c_str())}
@@ -221,7 +221,7 @@ Order CoinbaseRestClient::get_order(std::string_view order_id) const {
         });
         if (res.is_ok()) {
             auto j = json::parse(res.result_text);
-            LOG_TRACE(j.dump());
+            LOG_TRACE(j.dump().c_str());
             return j["order"].get<Order>();
         }
         LOG_ERROR("Failed to get order {}. error: {}", order_id, res.result_text);
@@ -241,7 +241,7 @@ std::vector<Fill> CoinbaseRestClient::list_fills(const FillQueryParams &params) 
             auto j = json::parse(res.result_text);
             std::vector<Fill> fills = j["fills"];
             while(j.contains("cursor") && !j["cursor"].get<std::string_view>().empty()) {
-                FillQueryParams new_query;
+                FillQueryParams new_query = params;
                 new_query.cursor = j["cursor"].get<std::string_view>();
                 res = Http::get(std::format("{}/api/v3/brokerage/orders/historical/fills{}", base_url_, new_query()), {
                     {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/orders/historical/fills", domain_).c_str())}
@@ -285,7 +285,7 @@ std::vector<PriceBook> CoinbaseRestClient::get_best_bid_ask(const std::vector<st
         });
         if (res.is_ok()) {
             auto j = json::parse(res.result_text);
-            LOG_TRACE(j.dump());
+            LOG_TRACE(j.dump().c_str());
             return j["pricebooks"];
         }
         LOG_ERROR("get_best_bid_ask failed. error: {}", res.result_text);
@@ -333,7 +333,7 @@ MarketTrades CoinbaseRestClient::get_market_trades(std::string_view product_id, 
 std::vector<Candle> CoinbaseRestClient::get_product_candles(std::string_view product_id, const ProductCandlesQueryParams &params) const
 {
     try {
-        LOG_TRACE(params());
+        LOG_TRACE(params().c_str());
         auto res = Http::get(std::format("{}/api/v3/brokerage/products/{}/candles{}", base_url_, product_id, params()), {
             {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/products/{}/candles", domain_, product_id).c_str())}
         });
@@ -404,7 +404,7 @@ CreateOrderResponse CoinbaseRestClient::create_order(
                 else {
                     rsp.error_response.message = std::format("TimeInForce {} invalid for market order", to_string(time_in_force));
                     rsp.success = false;
-                    LOG_ERROR(rsp.error_response.message);
+                    LOG_ERROR(rsp.error_response.message.c_str());
                     return rsp;
                 }
 
@@ -496,7 +496,7 @@ CreateOrderResponse CoinbaseRestClient::create_order(
                 else {
                     rsp.error_response.message = std::format("TimeInForce {} invalid for market order", to_string(time_in_force));
                     rsp.success = false;
-                    LOG_ERROR(rsp.error_response.message);
+                    LOG_ERROR(rsp.error_response.message.c_str());
                     return rsp;
                 }
 
@@ -558,7 +558,7 @@ CreateOrderResponse CoinbaseRestClient::create_order(
                 else {
                     rsp.error_response.message = std::format("TimeInForce {} invalid for market order", to_string(time_in_force));
                     rsp.success = false;
-                    LOG_ERROR(rsp.error_response.message);
+                    LOG_ERROR(rsp.error_response.message.c_str());
                     return rsp;
                 }
                 break;
@@ -624,7 +624,7 @@ CreateOrderResponse CoinbaseRestClient::create_order(
             }
             default: {
                 rsp.error_response.message = std::format("OrderType {} is not supported. client_order_id: {}", to_string(order_type), client_order_id);
-                LOG_ERROR(rsp.error_response.message);
+                LOG_ERROR(rsp.error_response.message.c_str());
                 rsp.success = false;
                 return rsp;
             }
@@ -650,15 +650,15 @@ CreateOrderResponse CoinbaseRestClient::create_order(
         });
         if (res.is_ok()) {
             auto j = json::parse(res.result_text);
-            LOG_TRACE(j.dump());
+            LOG_TRACE(j.dump().c_str());
             return j;
         }
         rsp.error_response.message = std::format("Failed to create order. client_order_id: {} error: {}", client_order_id, res.result_text);
-        LOG_ERROR(rsp.error_response.message);
+        LOG_ERROR(rsp.error_response.message.c_str());
     }
     catch (const std::exception &e) {
         rsp.error_response.message = std::format("Failed to create order. client_order_id: {}  error: {}", client_order_id, e.what());
-        LOG_ERROR(rsp.error_response.message);
+        LOG_ERROR(rsp.error_response.message.c_str());
     }
     rsp.success = false;
     return rsp;
@@ -703,7 +703,7 @@ ModifyOrderResponse CoinbaseRestClient::modify_order(
         });
         if (res.is_ok()) {
             auto j = json::parse(res.result_text);
-            LOG_TRACE(j.dump());
+            LOG_TRACE(j.dump().c_str());
             return j;
         }
         LOG_ERROR("modify_order failed. order_id: {}, error: {}", order_id, res.result_text);
@@ -729,7 +729,7 @@ std::vector<CancelOrderResponse> CoinbaseRestClient::cancel_orders(const std::ve
         });
         if (res.is_ok()) {
             auto j = json::parse(res.result_text);
-            LOG_TRACE(j.dump());
+            LOG_TRACE(j.dump().c_str());
             return j["results"];
         }
         LOG_ERROR("cancel_orders failed. error: {}", res.result_text);

@@ -555,7 +555,7 @@ inline void from_json(const json &j, Order &o) {
         }
     }
     catch (const std::exception &e) {
-        LOG_INFO(j.dump());
+        LOG_INFO(j.dump().c_str());
         LOG_ERROR(e.what());
     }
 }

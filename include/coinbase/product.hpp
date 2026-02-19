@@ -297,15 +297,43 @@ struct Product {
 inline void from_json(const json& j, Product& p) {
     VARIABLE_FROM_JSON(j, p, product_id);
     VARIABLE_FROM_JSON(j, p, base_name);
+    VARIABLE_FROM_JSON(j, p, base_display_symbol);
     VARIABLE_FROM_JSON(j, p, quote_name);
+    VARIABLE_FROM_JSON(j, p, quote_display_symbol);
     VARIABLE_FROM_JSON(j, p, status);
+    VARIABLE_FROM_JSON(j, p, quote_currency_id);
+    VARIABLE_FROM_JSON(j, p, base_currency_id);
+    VARIABLE_FROM_JSON(j, p, alias);
+    VARIABLE_FROM_JSON(j, p, display_name);
+    VARIABLE_FROM_JSON(j, p, product_venue);
+    DOUBLE_FROM_JSON(j, p, price);
+    DOUBLE_FROM_JSON(j, p, price_percentage_change_24h);
+    DOUBLE_FROM_JSON(j, p, price_increment);
+    DOUBLE_FROM_JSON(j, p, volume_24h);
+    DOUBLE_FROM_JSON(j, p, volume_percentage_change_24h);
     DOUBLE_FROM_JSON(j, p, base_increment);
     DOUBLE_FROM_JSON(j, p, base_min_size);
     DOUBLE_FROM_JSON(j, p, base_max_size);
     DOUBLE_FROM_JSON(j, p, quote_increment);
     DOUBLE_FROM_JSON(j, p, quote_min_size);
     DOUBLE_FROM_JSON(j, p, quote_max_size);
+    DOUBLE_FROM_JSON(j, p, mid_market_price);
+    DOUBLE_FROM_JSON(j, p, approximate_quote_24h_volume);
+    DOUBLE_FROM_JSON(j, p, market_cap);
+    INT_FROM_JSON(j, p, new_at);
     ENUM_FROM_JSON(j, p, product_type);
+    BOOL_FROM_JSON(j, p, watched);
+    BOOL_FROM_JSON(j, p, is_disabled);
+    BOOL_FROM_JSON_VALUE(j, p, is_new, "new");
+    BOOL_FROM_JSON(j, p, cancel_only);
+    BOOL_FROM_JSON(j, p, limit_only);
+    BOOL_FROM_JSON(j, p, post_only);
+    BOOL_FROM_JSON(j, p, trading_disabled);
+    BOOL_FROM_JSON(j, p, auction_mode);
+    BOOL_FROM_JSON(j, p, view_only);
+    STRUCT_FROM_JSON(j, p, fcm_trading_session_details);
+    STRUCT_FROM_JSON(j, p, future_product_details);
+    STRUCT_FROM_JSON(j, p, equity_product_details);
 }
 
 enum class ExpiringContractStatus : uint8_t {

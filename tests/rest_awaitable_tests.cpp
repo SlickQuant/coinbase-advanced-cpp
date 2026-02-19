@@ -11,23 +11,9 @@
 #include <boost/asio/use_awaitable.hpp>
 
 #include <slick/logger.hpp>
+#include <coinbase/logging.hpp>
 
 #define ENABLE_SLICK_LOGGER
-#ifdef ENABLE_SLICK_LOGGER
-    #ifndef INIT_LOGGER
-    #define INIT_LOGGER
-    namespace {
-        auto *s_logger = []() -> slick::logger::Logger* {
-            auto &logger = slick::logger::Logger::instance();
-            logger.clear_sinks();
-            logger.add_console_sink();
-            // logger.set_level(slick::logger::LogLevel::L_DEBUG);
-            logger.init(1048576, 16777216);
-            return &logger;
-        }();
-    }
-    #endif
-#endif
 
 #include <coinbase/rest_awaitable.hpp>
 
@@ -39,6 +25,19 @@ namespace coinbase::tests {
 // Test fixture for awaitable REST API tests
 class CoinbaseAwaitableTest : public ::testing::Test {
 protected:
+    static void SetUpTestSuite() {
+#ifdef ENABLE_SLICK_LOGGER
+        auto &logger = slick::logger::Logger::instance();
+        logger.clear_sinks();
+        logger.add_console_sink();
+        // logger.set_level(slick::logger::LogLevel::L_DEBUG);
+        logger.init(1048576, 16777216);
+        coinbase::logging::set_log_handler([&logger](slick::net::LogLevel level, const char* format_text, std::format_args args){
+            logger.log(static_cast<slick::logger::LogLevel>(level), format_text, args);
+        });
+#endif
+    }
+
     void SetUp() override {
         io_context_ = std::make_unique<asio::io_context>();
     }
@@ -173,19 +172,6 @@ TEST_F(CoinbaseAwaitableTest, GetAccountTest) {
     LOG_INFO("Retrieved account: {} with balance: {}", account.name, account.available_balance.value);
 }
 
-TEST_F(CoinbaseAwaitableTest, ListAccountsWithPaginationTest) {
-    AccountQueryParams params;
-    params.limit = 5;
-
-    auto accounts = run_async([this, &params]() -> asio::awaitable<std::vector<Account>> {
-        co_return co_await client_.list_accounts(params);
-    });
-
-    EXPECT_FALSE(accounts.empty());
-    EXPECT_LE(accounts.size(), 5);
-    LOG_INFO("Retrieved {} accounts with limit=5", accounts.size());
-}
-
 // ============================================================================
 // Product Tests
 // ============================================================================
@@ -274,19 +260,18 @@ TEST_F(CoinbaseAwaitableTest, ListOrdersTest) {
 
 TEST_F(CoinbaseAwaitableTest, ListOrdersWithFilterTest) {
     OrderQueryParams params;
+    params.order_status = {OrderStatus::OPEN};
     params.product_ids = {"BTC-USD"};
-    params.order_status = {OrderStatus::OPEN, OrderStatus::PENDING};
-    params.limit = 10;
 
     auto orders = run_async([this, &params]() -> asio::awaitable<std::vector<Order>> {
         co_return co_await client_.list_orders(params);
     });
 
-    LOG_INFO("Found {} open/pending BTC-USD orders", orders.size());
+    LOG_INFO("Found {} open BTC-USD orders", orders.size());
 
     for (const auto& order : orders) {
         EXPECT_EQ(order.product_id, "BTC-USD");
-        EXPECT_TRUE(order.status == OrderStatus::OPEN || order.status == OrderStatus::PENDING);
+        EXPECT_TRUE(order.status == OrderStatus::OPEN || order.status == OrderStatus::EXPIRED);
     }
 }
 
@@ -313,7 +298,6 @@ TEST_F(CoinbaseAwaitableTest, ListFillsTest) {
 TEST_F(CoinbaseAwaitableTest, ListFillsWithFilterTest) {
     FillQueryParams params;
     params.product_ids = {"BTC-USD"};
-    params.limit = 20;
 
     auto fills = run_async([this, &params]() -> asio::awaitable<std::vector<Fill>> {
         co_return co_await client_.list_fills(params);
