@@ -522,10 +522,13 @@ inline void from_json(const json &j, Order &o) {
         VARIABLE_FROM_JSON(j, o, retail_portfolio_id);
         VARIABLE_FROM_JSON(j, o, originating_order_id);
         VARIABLE_FROM_JSON(j, o, attached_order_id);
-        if (!j["current_pending_replace"].is_null()) {
-            o.current_pending_replace = j["current_pending_replace"];
+        STRUCT_FROM_JSON(j, o, current_pending_replace);
+        if (j.contains("creation_time")) {
+            o.created_time = milliseconds_from_json(j, "creation_time");
         }
-        TIMESTAMP_FROM_JSON(j, o, created_time);
+        else {
+            TIMESTAMP_FROM_JSON(j, o, created_time);
+        }
         TIMESTAMP_FROM_JSON(j, o, last_fill_time);
         DOUBLE_FROM_JSON(j, o, completion_percentage);
         DOUBLE_FROM_JSON(j, o, fee);
@@ -537,7 +540,9 @@ inline void from_json(const json &j, Order &o) {
         DOUBLE_FROM_JSON(j, o, workable_size);
         DOUBLE_FROM_JSON(j, o, workable_size_completion_pct);
         INT_FROM_JSON(j, o, number_of_fills);
-        o.edit_history = j["edit_history"];
+        if (j.contains("edit_history")) {
+            o.edit_history = j["edit_history"];
+        }
         ENUM_FROM_JSON(j, o, side);
         o.status = to_order_status(j.at("status").get<std::string_view>());
         ENUM_FROM_JSON(j, o, contract_expiry_type);
@@ -549,10 +554,8 @@ inline void from_json(const json &j, Order &o) {
         VARIABLE_FROM_JSON(j, o, size_inclusive_of_fees);
         VARIABLE_FROM_JSON(j, o, settled);
         VARIABLE_FROM_JSON(j, o, is_liquidation);
-        o.order_configuration = j["order_configuration"];
-        if (j.contains("attached_order_configuration")) {
-            o.attached_order_configuration = j["attached_order_configuration"];
-        }
+        STRUCT_FROM_JSON(j, o, order_configuration);
+        STRUCT_FROM_JSON(j, o, attached_order_configuration);
     }
     catch (const std::exception &e) {
         LOG_INFO(j.dump().c_str());

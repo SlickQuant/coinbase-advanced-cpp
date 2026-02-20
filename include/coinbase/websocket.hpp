@@ -29,7 +29,7 @@ using Websocket = slick::net::Websocket;
 using json = nlohmann::json;
 
 enum WebSocketChannel : uint8_t {
-    HEARTBEAT,
+    HEARTBEATS,
     LEVEL2,
     MARKET_TRADES,
     TICKER,

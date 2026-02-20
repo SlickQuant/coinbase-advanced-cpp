@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-02-19
+
+### Changed
+- **BREAKING:** Renamed WebSocket channel `HEARTBEAT` to `HEARTBEATS` to match Coinbase API specification
+- Improved JSON parsing macros to check for field existence before parsing (`TIMESTAMP_FROM_JSON`, `NANOSECONDS_FROM_JSON`, `DOUBLE_FROM_JSON`, `INT_FROM_JSON`)
+- Enhanced error logging to combine context and error messages for better debugging
+
+### Fixed
+- Fixed Order JSON parsing to handle optional fields (`edit_history`, `creation_time`, `current_pending_replace`, `attached_order_configuration`)
+- Fixed Order parsing to support both `creation_time` and `created_time` field names
+- Fixed WebSocket error handling to properly process and dispatch error messages instead of throwing exceptions
+- Fixed user event processing to use correct JSON path for order updates (`event.at("orders")` instead of `j.at("orders")`)
+- Fixed sequence number checks to handle messages without `sequence_num` field
+- Improved null-safety in JSON parsing throughout order and websocket modules
+
 ## [0.2.0] - 2026-02-19
 
 ### Added

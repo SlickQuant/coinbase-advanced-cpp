@@ -8,8 +8,8 @@ namespace coinbase {
 
 std::string to_string(WebSocketChannel channel) {
     switch(channel) {
-    case WebSocketChannel::HEARTBEAT:
-        return "heartbeat";
+    case WebSocketChannel::HEARTBEATS:
+        return "heartbeats";
     case WebSocketChannel::LEVEL2:
         return "level2";
     case WebSocketChannel::MARKET_TRADES:
@@ -279,7 +279,7 @@ void WebSocketClient::unsubscribe(const std::vector<std::string> &product_ids, c
         if (websocket->status() <= Websocket::Status::CONNECTED) {
             websocket->send(unsubscribe_str.c_str(), unsubscribe_str.size());
         }
-        if (channel == WebSocketChannel::HEARTBEAT) {
+        if (channel == WebSocketChannel::HEARTBEATS) {
             if (user_data_websocket_ && user_data_websocket_->status() <= Websocket::Status::CONNECTED) {
                 user_data_websocket_->send(unsubscribe_str.c_str(), unsubscribe_str.size());
             }
@@ -445,7 +445,13 @@ void WebSocketClient::onUserDataError(std::string &&err) {
 void DataHandler::processMarketData(WebSocketClient *ws_client, const char* data, std::size_t size) {
     try {
         auto j = json::parse(data, data + size);
-        checkMarketDataSequenceNumber(ws_client, j["sequence_num"]);
+        if (j.contains("sequence_num")) {
+            checkMarketDataSequenceNumber(ws_client, j["sequence_num"]);
+        }
+        if (j["type"] == "error") {
+            callbacks_->onMarketDataError(ws_client, j["message"]);
+            return;
+        }
         auto channel = j["channel"];
         if (channel == "l2_data") {
             processLevel2Update(ws_client, j);
@@ -479,7 +485,13 @@ void DataHandler::processMarketData(WebSocketClient *ws_client, const char* data
 void DataHandler::processUserData(WebSocketClient *ws_client, const char* data, std::size_t size) {
     try {
         auto j = json::parse(data, data + size);
-        checkUserDataSequenceNumber(ws_client, j["sequence_num"]);
+        if (j.contains("sequence_num")) {
+            checkUserDataSequenceNumber(ws_client, j["sequence_num"]);
+        }
+        if (j["type"] == "error") {
+            callbacks_->onUserDataError(ws_client, j["message"]);
+            return;
+        }
         auto channel = j["channel"];
         if (channel == "user") {
             processUserEvent(ws_client, j);
@@ -585,7 +597,7 @@ void DataHandler::processUserEvent(WebSocketClient *ws_client, const json &j) {
             callbacks_->onUserDataSnapshot(ws_client, j.at("sequence_num").get<uint64_t>(), orders, positions.at("perpetual_futures_positions"), positions.at("expiring_futures_positions"));
         }
         else if (event["type"] == "update") {
-            callbacks_->onOrderUpdates(ws_client, j.at("sequence_num").get<uint64_t>(), j.at("orders"));
+            callbacks_->onOrderUpdates(ws_client, j.at("sequence_num").get<uint64_t>(), event.at("orders"));
         }
         else {
             LOG_WARN("unknown user event type: {}", j["type"].get<std::string_view>());
