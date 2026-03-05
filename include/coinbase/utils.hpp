@@ -28,6 +28,9 @@ std::string timestamp_to_string(uint64_t timestamp_ms);
 // Parse ISO 8601 string to milliseconds
 uint64_t to_milliseconds(const std::string &iso_str);
 
+// Parse ISO 8601 string to microseconds
+uint64_t to_microseconds(const std::string &iso_str);
+
 // Parse ISO 8601 string to nanoseconds
 uint64_t to_nanoseconds(const std::string &iso_str);
 
@@ -35,8 +38,45 @@ inline uint64_t milliseconds_from_json(const json &j, std::string_view field) {
     return j.at(field).is_null() ? 0 : to_milliseconds(j.at(field).get<std::string>());
 }
 
+inline uint64_t microseconds_from_json(const json &j, std::string_view field) {
+    return j.at(field).is_null() ? 0 : to_microseconds(j.at(field).get<std::string>());
+}
+
 inline uint64_t nanoseconds_from_json(const json &j, std::string_view field) {
     return j.at(field).is_null() ? 0 : to_nanoseconds(j.at(field).get<std::string>());
+}
+
+// Automatically detect timestamp precision and parse accordingly
+inline uint64_t timestamp_from_json(const json &j, std::string_view field) {
+    if (j.at(field).is_null()) {
+        return 0;
+    }
+
+    auto timestamp_str = j.at(field).get<std::string>();
+
+    // Find fractional seconds
+    size_t dot_pos = timestamp_str.find('.');
+    if (dot_pos == std::string::npos) {
+        // No fractional seconds, use milliseconds
+        return to_milliseconds(timestamp_str);
+    }
+
+    // Count fractional digits
+    size_t end_pos = timestamp_str.find_first_of("Z+", dot_pos);
+    if (end_pos == std::string::npos) end_pos = timestamp_str.length();
+    size_t frac_digits = end_pos - dot_pos - 1;
+
+    // Choose precision based on fractional digits:
+    // 1-3 digits: milliseconds (e.g., .123)
+    // 4-6 digits: microseconds (e.g., .123456)
+    // 7-9 digits: nanoseconds (e.g., .123456789)
+    if (frac_digits <= 3) {
+        return to_milliseconds(timestamp_str);
+    } else if (frac_digits <= 6) {
+        return to_microseconds(timestamp_str);
+    } else {
+        return to_nanoseconds(timestamp_str);
+    }
 }
 
 inline double double_from_json(const json &j, std::string_view field) {
@@ -108,7 +148,7 @@ inline std::string to_string(double value, Side side, double min_increment) {
     return oss.str();
 }
 
-#define TIMESTAMP_FROM_JSON(j, o, field) if (j.contains(#field)) o.field = milliseconds_from_json(j, #field)
+#define TIMESTAMP_FROM_JSON(j, o, field) if (j.contains(#field)) o.field = timestamp_from_json(j, #field)
 #define NANOSECONDS_FROM_JSON(j, o, field) if (j.contains(#field)) o.field = nanoseconds_from_json(j, #field)
 #define DOUBLE_FROM_JSON(j, o, field) if (j.contains(#field)) o.field = double_from_json(j, #field)
 #define INT_FROM_JSON(j, o, field) if (j.contains(#field)) o.field = int_from_json(j, #field)

@@ -56,12 +56,27 @@ std::string timestamp_to_string(uint64_t timestamp_ms) {
 uint64_t to_milliseconds(const std::string &iso_str) {
     // Parse ISO 8601 format: "YYYY-MM-DDTHH:MM:SS.sssZ"
     std::tm tm = {};
-    int milliseconds = 0;
+    double fractional_seconds = 0.0;
 
-    // Parse the date and time parts
-    std::sscanf(iso_str.c_str(), "%d-%d-%dT%d:%d:%d.%d",
-                &tm.tm_year, &tm.tm_mon, &tm.tm_mday,
-                &tm.tm_hour, &tm.tm_min, &tm.tm_sec, &milliseconds);
+    // Find the decimal point position
+    size_t dot_pos = iso_str.find('.');
+    if (dot_pos != std::string::npos) {
+        // Parse base timestamp
+        std::sscanf(iso_str.c_str(), "%d-%d-%dT%d:%d:%d",
+                    &tm.tm_year, &tm.tm_mon, &tm.tm_mday,
+                    &tm.tm_hour, &tm.tm_min, &tm.tm_sec);
+
+        // Extract fractional seconds (e.g., ".718887" -> 0.718887)
+        size_t end_pos = iso_str.find_first_of("Z+", dot_pos);
+        if (end_pos == std::string::npos) end_pos = iso_str.length();
+        std::string frac_str = "0" + iso_str.substr(dot_pos, end_pos - dot_pos);
+        fractional_seconds = std::stod(frac_str);
+    } else {
+        // No fractional seconds
+        std::sscanf(iso_str.c_str(), "%d-%d-%dT%d:%d:%d",
+                    &tm.tm_year, &tm.tm_mon, &tm.tm_mday,
+                    &tm.tm_hour, &tm.tm_min, &tm.tm_sec);
+    }
 
     tm.tm_year -= 1900;  // tm_year is years since 1900
     tm.tm_mon -= 1;       // tm_mon is 0-11
@@ -75,21 +90,88 @@ uint64_t to_milliseconds(const std::string &iso_str) {
 #endif
 
     // Convert to milliseconds and add the fractional part
+    uint64_t milliseconds = static_cast<uint64_t>(fractional_seconds * 1000.0);
     return static_cast<uint64_t>(time) * 1000 + milliseconds;
+}
+
+uint64_t to_microseconds(const std::string &iso_str) {
+    // Parse ISO 8601 format: "YYYY-MM-DDTHH:MM:SS.ssssssZ"
+    std::tm tm = {};
+    double fractional_seconds = 0.0;
+
+    // Find the decimal point position
+    size_t dot_pos = iso_str.find('.');
+    if (dot_pos != std::string::npos) {
+        // Parse base timestamp
+        int parsed = std::sscanf(iso_str.c_str(), "%d-%d-%dT%d:%d:%d",
+                                 &tm.tm_year, &tm.tm_mon, &tm.tm_mday,
+                                 &tm.tm_hour, &tm.tm_min, &tm.tm_sec);
+
+        if (parsed < 6) {
+            return 0;
+        }
+
+        // Extract fractional seconds (e.g., ".718887" -> 0.718887)
+        size_t end_pos = iso_str.find_first_of("Z+", dot_pos);
+        if (end_pos == std::string::npos) end_pos = iso_str.length();
+        std::string frac_str = "0" + iso_str.substr(dot_pos, end_pos - dot_pos);
+        fractional_seconds = std::stod(frac_str);
+    } else {
+        // No fractional seconds
+        int parsed = std::sscanf(iso_str.c_str(), "%d-%d-%dT%d:%d:%d",
+                                 &tm.tm_year, &tm.tm_mon, &tm.tm_mday,
+                                 &tm.tm_hour, &tm.tm_min, &tm.tm_sec);
+        if (parsed < 6) {
+            return 0;
+        }
+    }
+
+    tm.tm_year -= 1900;  // tm_year is years since 1900
+    tm.tm_mon -= 1;       // tm_mon is 0-11
+    tm.tm_isdst = 0;      // Not daylight saving time
+
+    // Convert to time_t (seconds since epoch, UTC)
+#ifdef _WIN32
+    auto time = _mkgmtime(&tm);
+#else
+    auto time = timegm(&tm);
+#endif
+
+    // Convert to microseconds and add the fractional part
+    uint64_t microseconds = static_cast<uint64_t>(fractional_seconds * 1000000.0);
+    return static_cast<uint64_t>(time) * 1000000ULL + microseconds;
 }
 
 uint64_t to_nanoseconds(const std::string &iso_str) {
     // Parse ISO 8601 format: "YYYY-MM-DDTHH:MM:SS.sssssssssZ"
     std::tm tm = {};
-    int nanoseconds = 0;
+    double fractional_seconds = 0.0;
 
-    // Parse the date and time parts
-    int parsed = std::sscanf(iso_str.c_str(), "%d-%d-%dT%d:%d:%d.%d",
-                             &tm.tm_year, &tm.tm_mon, &tm.tm_mday,
-                             &tm.tm_hour, &tm.tm_min, &tm.tm_sec, &nanoseconds);
+    // Find the decimal point position
+    size_t dot_pos = iso_str.find('.');
+    if (dot_pos != std::string::npos) {
+        // Parse base timestamp
+        int parsed = std::sscanf(iso_str.c_str(), "%d-%d-%dT%d:%d:%d",
+                                 &tm.tm_year, &tm.tm_mon, &tm.tm_mday,
+                                 &tm.tm_hour, &tm.tm_min, &tm.tm_sec);
 
-    if (parsed < 6) {
-        return 0;
+        if (parsed < 6) {
+            return 0;
+        }
+
+        // Extract fractional seconds (e.g., ".718887475" -> 0.718887475)
+        size_t end_pos = iso_str.find_first_of("Z+", dot_pos);
+        if (end_pos == std::string::npos) end_pos = iso_str.length();
+        std::string frac_str = "0" + iso_str.substr(dot_pos, end_pos - dot_pos);
+        fractional_seconds = std::stod(frac_str);
+    } else {
+        // No fractional seconds
+        int parsed = std::sscanf(iso_str.c_str(), "%d-%d-%dT%d:%d:%d",
+                                 &tm.tm_year, &tm.tm_mon, &tm.tm_mday,
+                                 &tm.tm_hour, &tm.tm_min, &tm.tm_sec);
+        if (parsed < 6) {
+            return 0;
+        }
     }
 
     tm.tm_year -= 1900;  // tm_year is years since 1900
@@ -104,6 +186,7 @@ uint64_t to_nanoseconds(const std::string &iso_str) {
 #endif
 
     // Convert to nanoseconds and add the fractional part
+    uint64_t nanoseconds = static_cast<uint64_t>(fractional_seconds * 1000000000.0);
     return static_cast<uint64_t>(time) * 1000000000ULL + nanoseconds;
 }
 
