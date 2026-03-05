@@ -7,8 +7,6 @@
 #include <coinbase/logging.hpp>
 #include <coinbase/websocket.hpp>
 
-#define ENABLE_SLICK_LOGGER
-
 namespace coinbase::tests {
     template<typename CallbacksType>
     class WebSocketT : public ::testing::Test, public CallbacksType {
