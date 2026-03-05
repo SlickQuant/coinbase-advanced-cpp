@@ -11,7 +11,6 @@
 namespace coinbase {
 
 struct Level2Update {
-    uint64_t seq_num;
     uint64_t event_time;
     Side side;
     double price_level;

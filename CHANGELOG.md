@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Enhance ISO 8601 parsing with microsecond and nanosecond support
+- Convert all timestamp to nanoseconds
+
+### Added
+- timestamp parsing tests
 
 ## [0.2.1] - 2026-02-19
 
