@@ -288,7 +288,7 @@ void WebSocketClient::unsubscribe(const std::vector<std::string> &product_ids, c
 }
 
 void WebSocketClient::logData(std::string_view data_file, uint32_t data_queue_size) {
-    data_log_.open(std::string(data_file), std::ios::out | std::ios::ate);
+    data_log_.open(std::string(data_file), std::ios::out | std::ios::app);
     if (data_log_.is_open()) {
         if (user_thread_callbacks_) {
             data_queue_ = &user_thread_callbacks_->data_queue_;
