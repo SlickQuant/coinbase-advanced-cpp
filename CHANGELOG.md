@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [unreleased]
 
+### Added
+- taker_fee_rate and maker_fee_rate in REST api.
+
 ### Changed
 - Change log file opening mode to append for data logging
 

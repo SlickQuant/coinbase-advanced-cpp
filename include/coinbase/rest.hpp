@@ -48,6 +48,9 @@ public:
 
     std::vector<Fill> list_fills(const FillQueryParams &params = {}) const;
 
+    double get_taker_fee_rate() const;
+    double get_maker_fee_rate() const;
+
     uint64_t get_server_time() const;
 
     std::vector<PriceBook> get_best_bid_ask(const std::vector<std::string> &product_ids) const;

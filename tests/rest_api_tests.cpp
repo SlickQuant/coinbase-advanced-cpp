@@ -502,4 +502,14 @@ TEST_F(CoinbaseAdvancedTest, ListFillsTest) {
     }
 }
 
+TEST_F(CoinbaseAdvancedTest, TakerFeeRateTest) {
+    auto fee_rate = client_.get_taker_fee_rate();
+    EXPECT_NE(fee_rate, 0.0);
+}
+
+TEST_F(CoinbaseAdvancedTest, MakerFeeRateTest) {
+    auto fee_rate = client_.get_maker_fee_rate();
+    EXPECT_NE(fee_rate, 0.0);
+}
+
 } // namespace coinbase::tests

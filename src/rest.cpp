@@ -265,6 +265,40 @@ std::vector<Fill> CoinbaseRestClient::list_fills(const FillQueryParams &params) 
     return {};
 }
 
+double CoinbaseRestClient::get_taker_fee_rate() const {
+    try {
+        auto res = Http::get(std::format("{}/api/v3/brokerage/transaction_summary", base_url_), {
+            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/transaction_summary", domain_).c_str())}
+        });
+        if (res.is_ok()) {
+            auto j = json::parse(res.result_text);
+            return atof(j["fee_tier"]["taker_fee_rate"].get<std::string>().c_str());
+        }
+        LOG_ERROR("get_taker_fee_rate failed. error: {}", res.result_text);
+    }
+    catch (const std::exception &e) {
+        LOG_ERROR("get_taker_fee_rate failed. error: {}", e.what());
+    }
+    return 0.0012;
+}
+
+double CoinbaseRestClient::get_maker_fee_rate() const {
+    try {
+        auto res = Http::get(std::format("{}/api/v3/brokerage/transaction_summary", base_url_), {
+            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/transaction_summary", domain_).c_str())}
+        });
+        if (res.is_ok()) {
+            auto j = json::parse(res.result_text);
+            return atof(j["fee_tier"]["maker_fee_rate"].get<std::string>().c_str());
+        }
+        LOG_ERROR("get_maker_fee_rate failed. error: {}", res.result_text);
+    }
+    catch (const std::exception &e) {
+        LOG_ERROR("get_maker_fee_rate failed. error: {}", e.what());
+    }
+    return 0.006;
+}
+
 std::vector<PriceBook> CoinbaseRestClient::get_best_bid_ask(const std::vector<std::string> &product_ids) const {
     try {
         if (product_ids.empty()) {
