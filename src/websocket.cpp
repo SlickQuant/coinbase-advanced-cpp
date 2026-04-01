@@ -587,17 +587,17 @@ void DataHandler::processStatus(WebSocketClient *ws_client, const json &j) {
 
 void DataHandler::processUserEvent(WebSocketClient *ws_client, const json &j) {
     for (auto& event : j["events"]) {
+        std::vector<Order> orders;
+        for (auto& order : event.at("orders")) {
+            orders.push_back({});
+            from_snapshot(order, orders.back());
+        }
         if (event["type"] == "snapshot") {
             auto &positions = event.at("positions");
-            std::vector<Order> orders;
-            for (auto& order : event.at("orders")) {
-                orders.push_back({});
-                from_snapshot(order, orders.back());
-            }
             callbacks_->onUserDataSnapshot(ws_client, j.at("sequence_num").get<uint64_t>(), orders, positions.at("perpetual_futures_positions"), positions.at("expiring_futures_positions"));
         }
         else if (event["type"] == "update") {
-            callbacks_->onOrderUpdates(ws_client, j.at("sequence_num").get<uint64_t>(), event.at("orders"));
+            callbacks_->onOrderUpdates(ws_client, j.at("sequence_num").get<uint64_t>(), orders);
         }
         else {
             LOG_WARN("unknown user event type: {}", j["type"].get<std::string_view>());

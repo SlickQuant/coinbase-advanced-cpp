@@ -483,6 +483,7 @@ struct Order {
     uint64_t last_fill_time = 0;
     double completion_percentage = 0;
     double fee = 0;
+    double limit_price = 0;
     double avg_price = 0;
     double leaves_quantity = 0;
     double cumulative_quantity = 0;
@@ -567,6 +568,7 @@ inline void from_snapshot(const json &j, Order &o) {
     VARIABLE_FROM_JSON(j, o, client_order_id);
     VARIABLE_FROM_JSON(j, o, order_id);
     VARIABLE_FROM_JSON(j, o, product_id);
+    DOUBLE_FROM_JSON(j, o, limit_price);
     DOUBLE_FROM_JSON(j, o, avg_price);
     DOUBLE_FROM_JSON(j, o, completion_percentage);
     ENUM_FROM_JSON(j, o, contract_expiry_type);
