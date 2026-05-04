@@ -682,7 +682,9 @@ CreateOrderResponse CoinbaseRestClient::create_order(
             {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("POST {}/api/v3/brokerage/orders", domain_).c_str())},
             {"Content-Type", "application/json"}
         });
-        if (res.is_ok()) {
+
+        rsp.success = res.is_ok();
+        if (!res.result_text.empty()) {
             auto j = json::parse(res.result_text);
             LOG_TRACE(j.dump().c_str());
             return j;
@@ -735,12 +737,13 @@ ModifyOrderResponse CoinbaseRestClient::modify_order(
             {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("POST {}/api/v3/brokerage/orders/edit", domain_).c_str())},
             {"Content-Type", "application/json"}
         });
-        if (res.is_ok()) {
+        rsp.success = res.is_ok();
+        if (!res.result_text.empty()) {
             auto j = json::parse(res.result_text);
             LOG_TRACE(j.dump().c_str());
             return j;
         }
-        LOG_ERROR("modify_order failed. order_id: {}, error: {}", order_id, res.result_text);
+        LOG_ERROR("modify_order failed. order_id: {}, error: {}", order_id, res.reason);
     }
     catch (const std::exception &e) {
         LOG_ERROR("modify_order failed. order_id: {}, error: {}", order_id, e.what());
@@ -761,7 +764,7 @@ std::vector<CancelOrderResponse> CoinbaseRestClient::cancel_orders(const std::ve
             {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("POST {}/api/v3/brokerage/orders/batch_cancel", domain_).c_str())},
             {"Content-Type", "application/json"}
         });
-        if (res.is_ok()) {
+        if (!res.result_text.empty()) {
             auto j = json::parse(res.result_text);
             LOG_TRACE(j.dump().c_str());
             return j["results"];
