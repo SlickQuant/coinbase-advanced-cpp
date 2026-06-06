@@ -182,8 +182,8 @@ private:
     DataHandler* data_handler_ = nullptr;
     std::string market_data_url_;
     std::string user_data_url_;
-    std::shared_ptr<Websocket> market_data_websocket_;
-    std::shared_ptr<Websocket> user_data_websocket_;
+    std::unique_ptr<Websocket> market_data_websocket_;
+    std::unique_ptr<Websocket> user_data_websocket_;
     std::array<std::unordered_set<std::string>, static_cast<uint8_t>(WebSocketChannel::__COUNT__)> product_ids_;
     std::vector<std::string> pending_subscriptions_;
     std::string user_id_;
@@ -192,8 +192,6 @@ private:
     slick::SlickQueue<char> *data_queue_ = nullptr;
     std::thread logger_thread_;
     std::atomic_bool logger_run_ = false;
-    std::atomic_int_fast8_t pending_md_socket_close_ = 0;
-    std::atomic_int_fast8_t pending_user_socket_close_ = 0;
     uint64_t data_cursor_ = 0;
     static inline constexpr char empty_msg = '\0';
 };

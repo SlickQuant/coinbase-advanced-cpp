@@ -12,6 +12,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Change log file opening mode to append for data logging
+- Upgraded slick-net dependency from v2.0.0 to v2.1.0
+- Changed `market_data_websocket_` and `user_data_websocket_` members from `shared_ptr` to `unique_ptr`
+- Refactored WebSocketClient destructor to call `reset_callbacks()` before closing sockets, eliminating busy-wait polling loops on disconnect
+- Removed atomic `pending_md_socket_close_` and `pending_user_socket_close_` counters
+- `stop()` no longer resets websocket pointers; connection state is preserved for reconnect
+- Disconnect callbacks no longer reset websocket pointers
+- `subscribe()` now checks socket status to reopen a disconnected (but existing) connection instead of only creating on null
+- Heartbeat subscription is now sent immediately after `open()` on user data socket creation
+
+### Fixed
+- `unsubscribe()` now holds a reference to the `unique_ptr` instead of copying it
 
 ## [0.2.2] - 2026-03-05
 

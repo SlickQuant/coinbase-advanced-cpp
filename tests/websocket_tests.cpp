@@ -439,18 +439,18 @@ namespace coinbase::tests {
 
     TEST_F(WebSocketTests, RepeatedConnectDisconnect) {
         constexpr int kIterations = 5;
+        WebSocketClient client_(this);
         for (int i = 0; i < kIterations; ++i) {
-            client_ = std::make_unique<WebSocketClient>(this);
             auto connected_before = md_connected_count_.load(std::memory_order_relaxed);
             auto disconnected_before = md_disconnected_count_.load(std::memory_order_relaxed);
-            client_->subscribe({"BTC-USD"}, {WebSocketChannel::LEVEL2});
+            client_.subscribe({"BTC-USD"}, {WebSocketChannel::LEVEL2});
             auto start = std::chrono::steady_clock::now();
             while (md_connected_count_.load(std::memory_order_relaxed) == connected_before &&
                    (std::chrono::steady_clock::now() - start) < std::chrono::seconds(5)) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(50));
             }
             const bool connected = md_connected_count_.load(std::memory_order_relaxed) > connected_before;
-            client_.reset();
+            client_.stop();
             if (connected) {
                 start = std::chrono::steady_clock::now();
                 while (md_disconnected_count_.load(std::memory_order_relaxed) == disconnected_before &&

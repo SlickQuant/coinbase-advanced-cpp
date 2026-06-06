@@ -18,14 +18,14 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(OpenSSL CONFIG REQUIRED)
 find_package(jwt-cpp CONFIG REQUIRED)
 
-find_package(slick-net 2.0.0 CONFIG QUIET)
+find_package(slick-net 2.1.0 CONFIG QUIET)
 if (NOT slick-net_FOUND)
     message(STATUS "fetching slick-net...")
     include(FetchContent)
     FetchContent_Declare(
         slick-net
         GIT_REPOSITORY https://github.com/SlickQuant/slick-net.git
-        GIT_TAG v2.0.0
+        GIT_TAG v2.1.0
     )
     FetchContent_MakeAvailable(slick-net)
 else()

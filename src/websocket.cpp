@@ -160,24 +160,15 @@ WebSocketClient::WebSocketClient(
 WebSocketClient::~WebSocketClient() {
     if (market_data_websocket_) {
         if (market_data_websocket_->status() != Websocket::Status::DISCONNECTED) {
+            market_data_websocket_->reset_callbacks();
             market_data_websocket_->close();
-            if (pending_md_socket_close_.fetch_add(1, std::memory_order_acq_rel) == 0) {
-                // waiting for on disconnected callback
-                auto start = std::chrono::system_clock::now();
-                while(pending_md_socket_close_.load(std::memory_order_acquire) == 1 &&
-                      (std::chrono::system_clock::now() - start) < std::chrono::seconds(2));
-            }
         }
         market_data_websocket_.reset();
     }
     if (user_data_websocket_) {
         if (user_data_websocket_->status() != Websocket::Status::DISCONNECTED) {
+            user_data_websocket_->reset_callbacks();
             user_data_websocket_->close();
-            if (pending_user_socket_close_.fetch_add(1, std::memory_order_acq_rel) == 0) {
-                auto start = std::chrono::system_clock::now();
-                while(pending_user_socket_close_.load(std::memory_order_acquire) == 1 &&
-                      (std::chrono::system_clock::now() - start) < std::chrono::seconds(2));
-            }
         }
         user_data_websocket_.reset();
     }
@@ -206,13 +197,11 @@ void WebSocketClient::stop() {
         if (market_data_websocket_->status() != Websocket::Status::DISCONNECTED) {
             market_data_websocket_->close();
         }
-        market_data_websocket_.reset();
     }
     if (user_data_websocket_) {
         if (user_data_websocket_->status() != Websocket::Status::DISCONNECTED) {
             user_data_websocket_->close();
         }
-        user_data_websocket_.reset();
     }
 }
 
@@ -220,18 +209,27 @@ void WebSocketClient::subscribe(const std::vector<std::string> &product_ids, con
     for (auto channel : channels) {
         auto products = product_ids_[static_cast<uint8_t>(channel)];
         auto subscribe_json = json{{"type", "subscribe"}, {"product_ids", product_ids}, {"channel", to_string(channel)}};
-        std::shared_ptr<Websocket> websocket;
+        Websocket* websocket;
         if (channel == WebSocketChannel::USER) {
-            if (!user_data_websocket_ && !user_data_url_.empty()) {
-                user_data_websocket_ = std::make_shared<Websocket>(
-                    user_data_url_,
-                    [this]() { onUserDataConnected(); },
-                    [this]() { onUserDataDisconnected(); },
-                    [this](const char* data, std::size_t size) { onUserData(data, size); },
-                    [this](std::string err) { onUserDataError(std::move(err)); }
-                );
+            if (!user_data_websocket_) {
+                if (!user_data_url_.empty()) {
+                    user_data_websocket_ = std::make_unique<Websocket>(
+                        user_data_url_,
+                        [this]() { onUserDataConnected(); },
+                        [this]() { onUserDataDisconnected(); },
+                        [this](const char* data, std::size_t size) { onUserData(data, size); },
+                        [this](std::string err) { onUserDataError(std::move(err)); }
+                    );
+                    user_data_websocket_->open();
+    
+                    // subscribe heartbeat to keep user channel alive
+                    auto heartbeat_sub = json{{"type", "subscribe"}, {"channel", "heartbeats"}};
+                    heartbeat_sub["jwt"] = generate_coinbase_jwt(user_data_url_.c_str());
+                    auto subscribe_str = heartbeat_sub.dump();
+                    user_data_websocket_->send(subscribe_str.c_str(), subscribe_str.size());
+                }
+            } else if (user_data_websocket_->status() > Websocket::Status::CONNECTED) {
                 user_data_websocket_->open();
-                pending_user_socket_close_.store(0, std::memory_order_release);
 
                 // subscribe heartbeat to keep user channel alive
                 auto heartbeat_sub = json{{"type", "subscribe"}, {"channel", "heartbeats"}};
@@ -239,22 +237,25 @@ void WebSocketClient::subscribe(const std::vector<std::string> &product_ids, con
                 auto subscribe_str = heartbeat_sub.dump();
                 user_data_websocket_->send(subscribe_str.c_str(), subscribe_str.size());
             }
-            websocket = user_data_websocket_;
+            websocket = user_data_websocket_.get();
             subscribe_json["jwt"] = generate_coinbase_jwt(user_data_url_.c_str());
         }
         else {
-            if (!market_data_websocket_ && !market_data_url_.empty()) {
-                market_data_websocket_ = std::make_shared<Websocket>(
-                    market_data_url_,
-                    [this]() { onMarketDataConnected(); },
-                    [this]() { onMarketDataDisconnected(); },
-                    [this](const char* data, std::size_t size) { onMarketData(data, size); },
-                    [this](std::string err) { onMarketDataError(std::move(err)); }
-                );
+            if (!market_data_websocket_) {
+                if (!market_data_url_.empty()) {
+                    market_data_websocket_ = std::make_unique<Websocket>(
+                        market_data_url_,
+                        [this]() { onMarketDataConnected(); },
+                        [this]() { onMarketDataDisconnected(); },
+                        [this](const char* data, std::size_t size) { onMarketData(data, size); },
+                        [this](std::string err) { onMarketDataError(std::move(err)); }
+                    );
+                    market_data_websocket_->open();
+                }
+            } else if (market_data_websocket_->status() > Websocket::Status::CONNECTED) {
                 market_data_websocket_->open();
-                pending_md_socket_close_.store(0, std::memory_order_release);
             }
-            websocket = market_data_websocket_;
+            websocket = market_data_websocket_.get();
         }
 
         if (websocket == nullptr) {
@@ -269,7 +270,7 @@ void WebSocketClient::subscribe(const std::vector<std::string> &product_ids, con
 
 void WebSocketClient::unsubscribe(const std::vector<std::string> &product_ids, const std::vector<WebSocketChannel> &channels) {
     for (auto channel : channels) {
-        auto websocket = channel == WebSocketChannel::USER ? user_data_websocket_ : market_data_websocket_;
+        auto &websocket = channel == WebSocketChannel::USER ? user_data_websocket_ : market_data_websocket_;
         auto unsubscribe_json = json{{"type", "unsubscribe"}, {"product_ids", product_ids}, {"channel", to_string(channel)}};
         auto unsubscribe_str = unsubscribe_json.dump();
         if (websocket == nullptr) {
@@ -369,8 +370,6 @@ void WebSocketClient::onMarketDataDisconnected() {
         data_handler_->callbacks_->onMarketDataDisconnected(this);
         data_handler_->resetMarketDataSequence(this);
     }
-    pending_md_socket_close_.fetch_add(1, std::memory_order_acq_rel);
-    market_data_websocket_.reset();
 }
 
 
@@ -391,8 +390,6 @@ void WebSocketClient::onUserDataDisconnected() {
         data_handler_->callbacks_->onUserDataDisconnected(this);
         data_handler_->resetUserDataSequence(this);
     }
-    pending_user_socket_close_.fetch_add(1, std::memory_order_acq_rel);
-    user_data_websocket_.reset();
 }
 
 void WebSocketClient::onMarketData(const char* data, std::size_t size) {
