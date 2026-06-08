@@ -49,7 +49,11 @@ inline uint64_t nanoseconds_from_json(const json &j, std::string_view field) {
 inline double double_from_json(const json &j, std::string_view field) {
     try
     {
-        auto f = j.at(field).get<std::string_view>();
+        const auto &v = j.at(field);
+        if (v.is_number()) {
+            return v.get<double>();
+        }
+        auto f = v.get<std::string_view>();
         if (f.empty()) {
             return 0.;
         }

@@ -791,4 +791,518 @@ std::vector<CancelOrderResponse> CoinbaseRestClient::cancel_orders(const std::ve
     return rt;
 }
 
+std::vector<Portfolio> CoinbaseRestClient::list_portfolios(std::optional<PortfolioType> portfolio_type) const {
+    try {
+        std::string query;
+        if (portfolio_type.has_value()) {
+            query = std::format("?portfolio_type={}", to_string(portfolio_type.value()));
+        }
+        auto res = Http::get(std::format("{}/api/v3/brokerage/portfolios{}", base_url_, query), {
+            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/portfolios", domain_).c_str())}
+        });
+        if (res.is_ok()) {
+            auto j = json::parse(res.result_text);
+            return j["portfolios"];
+        }
+        LOG_ERROR("list_portfolios failed. error: {}", res.result_text);
+    }
+    catch (const std::exception &e) {
+        LOG_ERROR("list_portfolios failed. error: {}", e.what());
+    }
+    return {};
+}
+
+Portfolio CoinbaseRestClient::create_portfolio(std::string_view name) const {
+    try {
+        json body {
+            {"name", name},
+        };
+        auto res = Http::post(std::format("{}/api/v3/brokerage/portfolios", base_url_), body.dump(), {
+            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("POST {}/api/v3/brokerage/portfolios", domain_).c_str())},
+            {"Content-Type", "application/json"}
+        });
+        if (res.is_ok()) {
+            auto j = json::parse(res.result_text);
+            return j["portfolio"].get<Portfolio>();
+        }
+        LOG_ERROR("create_portfolio failed. error: {}", res.result_text);
+    }
+    catch (const std::exception &e) {
+        LOG_ERROR("create_portfolio failed. error: {}", e.what());
+    }
+    return {};
+}
+
+PortfolioBreakdown CoinbaseRestClient::get_portfolio_breakdown(std::string_view portfolio_uuid, std::optional<std::string_view> currency) const {
+    try {
+        std::string query;
+        if (currency.has_value()) {
+            query = std::format("?currency={}", currency.value());
+        }
+        auto res = Http::get(std::format("{}/api/v3/brokerage/portfolios/{}{}", base_url_, portfolio_uuid, query), {
+            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/portfolios/{}", domain_, portfolio_uuid).c_str())}
+        });
+        if (res.is_ok()) {
+            auto j = json::parse(res.result_text);
+            return j["breakdown"].get<PortfolioBreakdown>();
+        }
+        LOG_ERROR("get_portfolio_breakdown failed. portfolio_uuid: {}, error: {}", portfolio_uuid, res.result_text);
+    }
+    catch (const std::exception &e) {
+        LOG_ERROR("get_portfolio_breakdown failed. portfolio_uuid: {}, error: {}", portfolio_uuid, e.what());
+    }
+    return {};
+}
+
+MovePortfolioFundsResult CoinbaseRestClient::move_portfolio_funds(double value, std::string_view currency, std::string_view source_portfolio_uuid, std::string_view target_portfolio_uuid) const {
+    try {
+        json body {
+            {"funds", {
+                {"value", std::to_string(value)},
+                {"currency", currency},
+            }},
+            {"source_portfolio_uuid", source_portfolio_uuid},
+            {"target_portfolio_uuid", target_portfolio_uuid},
+        };
+        auto res = Http::post(std::format("{}/api/v3/brokerage/portfolios/move_funds", base_url_), body.dump(), {
+            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("POST {}/api/v3/brokerage/portfolios/move_funds", domain_).c_str())},
+            {"Content-Type", "application/json"}
+        });
+        if (res.is_ok()) {
+            auto j = json::parse(res.result_text);
+            return j.get<MovePortfolioFundsResult>();
+        }
+        LOG_ERROR("move_portfolio_funds failed. error: {}", res.result_text);
+    }
+    catch (const std::exception &e) {
+        LOG_ERROR("move_portfolio_funds failed. error: {}", e.what());
+    }
+    return {};
+}
+
+Portfolio CoinbaseRestClient::edit_portfolio(std::string_view portfolio_uuid, std::string_view name) const {
+    try {
+        json body {
+            {"name", name},
+        };
+        auto res = Http::put(std::format("{}/api/v3/brokerage/portfolios/{}", base_url_, portfolio_uuid), body.dump(), {
+            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("PUT {}/api/v3/brokerage/portfolios/{}", domain_, portfolio_uuid).c_str())},
+            {"Content-Type", "application/json"}
+        });
+        if (res.is_ok()) {
+            auto j = json::parse(res.result_text);
+            return j["portfolio"].get<Portfolio>();
+        }
+        LOG_ERROR("edit_portfolio failed. portfolio_uuid: {}, error: {}", portfolio_uuid, res.result_text);
+    }
+    catch (const std::exception &e) {
+        LOG_ERROR("edit_portfolio failed. portfolio_uuid: {}, error: {}", portfolio_uuid, e.what());
+    }
+    return {};
+}
+
+bool CoinbaseRestClient::delete_portfolio(std::string_view portfolio_uuid) const {
+    try {
+        auto res = Http::del(std::format("{}/api/v3/brokerage/portfolios/{}", base_url_, portfolio_uuid), "", {
+            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("DELETE {}/api/v3/brokerage/portfolios/{}", domain_, portfolio_uuid).c_str())}
+        });
+        if (res.is_ok()) {
+            return true;
+        }
+        LOG_ERROR("delete_portfolio failed. portfolio_uuid: {}, error: {}", portfolio_uuid, res.result_text);
+    }
+    catch (const std::exception &e) {
+        LOG_ERROR("delete_portfolio failed. portfolio_uuid: {}, error: {}", portfolio_uuid, e.what());
+    }
+    return false;
+}
+
+ConvertTrade CoinbaseRestClient::create_convert_quote(std::string_view from_account, std::string_view to_account, double amount) const {
+    try {
+        json body {
+            {"from_account", from_account},
+            {"to_account", to_account},
+            {"amount", std::to_string(amount)},
+        };
+        auto res = Http::post(std::format("{}/api/v3/brokerage/convert/quote", base_url_), body.dump(), {
+            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("POST {}/api/v3/brokerage/convert/quote", domain_).c_str())},
+            {"Content-Type", "application/json"}
+        });
+        if (res.is_ok()) {
+            auto j = json::parse(res.result_text);
+            return j["trade"].get<ConvertTrade>();
+        }
+        LOG_ERROR("create_convert_quote failed. error: {}", res.result_text);
+    }
+    catch (const std::exception &e) {
+        LOG_ERROR("create_convert_quote failed. error: {}", e.what());
+    }
+    return {};
+}
+
+ConvertTrade CoinbaseRestClient::get_convert_trade(std::string_view trade_id, std::string_view from_account, std::string_view to_account) const {
+    try {
+        auto query = std::format("?from_account={}&to_account={}", from_account, to_account);
+        auto res = Http::get(std::format("{}/api/v3/brokerage/convert/trade/{}{}", base_url_, trade_id, query), {
+            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/convert/trade/{}", domain_, trade_id).c_str())}
+        });
+        if (res.is_ok()) {
+            auto j = json::parse(res.result_text);
+            return j["trade"].get<ConvertTrade>();
+        }
+        LOG_ERROR("get_convert_trade failed. trade_id: {}, error: {}", trade_id, res.result_text);
+    }
+    catch (const std::exception &e) {
+        LOG_ERROR("get_convert_trade failed. trade_id: {}, error: {}", trade_id, e.what());
+    }
+    return {};
+}
+
+ConvertTrade CoinbaseRestClient::commit_convert_trade(std::string_view trade_id, std::string_view from_account, std::string_view to_account) const {
+    try {
+        json body {
+            {"from_account", from_account},
+            {"to_account", to_account},
+        };
+        auto res = Http::post(std::format("{}/api/v3/brokerage/convert/trade/{}", base_url_, trade_id), body.dump(), {
+            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("POST {}/api/v3/brokerage/convert/trade/{}", domain_, trade_id).c_str())},
+            {"Content-Type", "application/json"}
+        });
+        if (res.is_ok()) {
+            auto j = json::parse(res.result_text);
+            return j["trade"].get<ConvertTrade>();
+        }
+        LOG_ERROR("commit_convert_trade failed. trade_id: {}, error: {}", trade_id, res.result_text);
+    }
+    catch (const std::exception &e) {
+        LOG_ERROR("commit_convert_trade failed. trade_id: {}, error: {}", trade_id, e.what());
+    }
+    return {};
+}
+
+std::vector<PaymentMethod> CoinbaseRestClient::list_payment_methods() const {
+    try {
+        auto res = Http::get(std::format("{}/api/v3/brokerage/payment_methods", base_url_), {
+            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/payment_methods", domain_).c_str())}
+        });
+        if (res.is_ok()) {
+            auto j = json::parse(res.result_text);
+            return j["payment_methods"];
+        }
+        LOG_ERROR("list_payment_methods failed. error: {}", res.result_text);
+    }
+    catch (const std::exception &e) {
+        LOG_ERROR("list_payment_methods failed. error: {}", e.what());
+    }
+    return {};
+}
+
+PaymentMethod CoinbaseRestClient::get_payment_method(std::string_view payment_method_id) const {
+    try {
+        auto res = Http::get(std::format("{}/api/v3/brokerage/payment_methods/{}", base_url_, payment_method_id), {
+            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/payment_methods/{}", domain_, payment_method_id).c_str())}
+        });
+        if (res.is_ok()) {
+            auto j = json::parse(res.result_text);
+            return j["payment_method"].get<PaymentMethod>();
+        }
+        LOG_ERROR("get_payment_method failed. payment_method_id: {}, error: {}", payment_method_id, res.result_text);
+    }
+    catch (const std::exception &e) {
+        LOG_ERROR("get_payment_method failed. payment_method_id: {}, error: {}", payment_method_id, e.what());
+    }
+    return {};
+}
+
+ApiKeyPermissions CoinbaseRestClient::get_api_key_permissions() const {
+    try {
+        auto res = Http::get(std::format("{}/api/v3/brokerage/key_permissions", base_url_), {
+            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/key_permissions", domain_).c_str())}
+        });
+        if (res.is_ok()) {
+            auto j = json::parse(res.result_text);
+            return j.get<ApiKeyPermissions>();
+        }
+        LOG_ERROR("get_api_key_permissions failed. error: {}", res.result_text);
+    }
+    catch (const std::exception &e) {
+        LOG_ERROR("get_api_key_permissions failed. error: {}", e.what());
+    }
+    return {};
+}
+
+FCMBalanceSummary CoinbaseRestClient::get_futures_balance_summary() const {
+    try {
+        auto res = Http::get(std::format("{}/api/v3/brokerage/cfm/balance_summary", base_url_), {
+            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/cfm/balance_summary", domain_).c_str())}
+        });
+        if (res.is_ok()) {
+            auto j = json::parse(res.result_text);
+            return j["balance_summary"].get<FCMBalanceSummary>();
+        }
+        LOG_ERROR("get_futures_balance_summary failed. error: {}", res.result_text);
+    }
+    catch (const std::exception &e) {
+        LOG_ERROR("get_futures_balance_summary failed. error: {}", e.what());
+    }
+    return {};
+}
+
+std::vector<FCMPosition> CoinbaseRestClient::list_futures_positions() const {
+    try {
+        auto res = Http::get(std::format("{}/api/v3/brokerage/cfm/positions", base_url_), {
+            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/cfm/positions", domain_).c_str())}
+        });
+        if (res.is_ok()) {
+            auto j = json::parse(res.result_text);
+            return j["positions"];
+        }
+        LOG_ERROR("list_futures_positions failed. error: {}", res.result_text);
+    }
+    catch (const std::exception &e) {
+        LOG_ERROR("list_futures_positions failed. error: {}", e.what());
+    }
+    return {};
+}
+
+FCMPosition CoinbaseRestClient::get_futures_position(std::string_view product_id) const {
+    try {
+        auto res = Http::get(std::format("{}/api/v3/brokerage/cfm/positions/{}", base_url_, product_id), {
+            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/cfm/positions/{}", domain_, product_id).c_str())}
+        });
+        if (res.is_ok()) {
+            auto j = json::parse(res.result_text);
+            return j["position"].get<FCMPosition>();
+        }
+        LOG_ERROR("get_futures_position failed. product_id: {}, error: {}", product_id, res.result_text);
+    }
+    catch (const std::exception &e) {
+        LOG_ERROR("get_futures_position failed. product_id: {}, error: {}", product_id, e.what());
+    }
+    return {};
+}
+
+bool CoinbaseRestClient::schedule_futures_sweep(double usd_amount) const {
+    try {
+        json body {
+            {"usd_amount", std::to_string(usd_amount)},
+        };
+        auto res = Http::post(std::format("{}/api/v3/brokerage/cfm/sweeps/schedule", base_url_), body.dump(), {
+            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("POST {}/api/v3/brokerage/cfm/sweeps/schedule", domain_).c_str())},
+            {"Content-Type", "application/json"}
+        });
+        if (res.is_ok()) {
+            auto j = json::parse(res.result_text);
+            return j.value("success", false);
+        }
+        LOG_ERROR("schedule_futures_sweep failed. error: {}", res.result_text);
+    }
+    catch (const std::exception &e) {
+        LOG_ERROR("schedule_futures_sweep failed. error: {}", e.what());
+    }
+    return false;
+}
+
+std::vector<FCMSweep> CoinbaseRestClient::list_futures_sweeps() const {
+    try {
+        auto res = Http::get(std::format("{}/api/v3/brokerage/cfm/sweeps", base_url_), {
+            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/cfm/sweeps", domain_).c_str())}
+        });
+        if (res.is_ok()) {
+            auto j = json::parse(res.result_text);
+            return j["sweeps"];
+        }
+        LOG_ERROR("list_futures_sweeps failed. error: {}", res.result_text);
+    }
+    catch (const std::exception &e) {
+        LOG_ERROR("list_futures_sweeps failed. error: {}", e.what());
+    }
+    return {};
+}
+
+bool CoinbaseRestClient::cancel_pending_futures_sweep() const {
+    try {
+        auto res = Http::del(std::format("{}/api/v3/brokerage/cfm/sweeps", base_url_), "", {
+            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("DELETE {}/api/v3/brokerage/cfm/sweeps", domain_).c_str())}
+        });
+        if (res.is_ok()) {
+            auto j = json::parse(res.result_text);
+            return j.value("success", false);
+        }
+        LOG_ERROR("cancel_pending_futures_sweep failed. error: {}", res.result_text);
+    }
+    catch (const std::exception &e) {
+        LOG_ERROR("cancel_pending_futures_sweep failed. error: {}", e.what());
+    }
+    return false;
+}
+
+std::string CoinbaseRestClient::get_intraday_margin_setting() const {
+    try {
+        auto res = Http::get(std::format("{}/api/v3/brokerage/cfm/intraday/margin_setting", base_url_), {
+            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/cfm/intraday/margin_setting", domain_).c_str())}
+        });
+        if (res.is_ok()) {
+            auto j = json::parse(res.result_text);
+            return j.value("setting", std::string{});
+        }
+        LOG_ERROR("get_intraday_margin_setting failed. error: {}", res.result_text);
+    }
+    catch (const std::exception &e) {
+        LOG_ERROR("get_intraday_margin_setting failed. error: {}", e.what());
+    }
+    return {};
+}
+
+CurrentMarginWindow CoinbaseRestClient::get_current_margin_window(std::string_view margin_profile_type) const {
+    try {
+        auto query = std::format("?margin_profile_type={}", margin_profile_type);
+        auto res = Http::get(std::format("{}/api/v3/brokerage/cfm/intraday/current_margin_window{}", base_url_, query), {
+            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/cfm/intraday/current_margin_window", domain_).c_str())}
+        });
+        if (res.is_ok()) {
+            auto j = json::parse(res.result_text);
+            return j.get<CurrentMarginWindow>();
+        }
+        LOG_ERROR("get_current_margin_window failed. error: {}", res.result_text);
+    }
+    catch (const std::exception &e) {
+        LOG_ERROR("get_current_margin_window failed. error: {}", e.what());
+    }
+    return {};
+}
+
+bool CoinbaseRestClient::set_intraday_margin_setting(std::string_view setting) const {
+    try {
+        json body {
+            {"setting", setting},
+        };
+        auto res = Http::post(std::format("{}/api/v3/brokerage/cfm/intraday/margin_setting", base_url_), body.dump(), {
+            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("POST {}/api/v3/brokerage/cfm/intraday/margin_setting", domain_).c_str())},
+            {"Content-Type", "application/json"}
+        });
+        if (res.is_ok()) {
+            auto j = json::parse(res.result_text);
+            return j.value("success", false);
+        }
+        LOG_ERROR("set_intraday_margin_setting failed. error: {}", res.result_text);
+    }
+    catch (const std::exception &e) {
+        LOG_ERROR("set_intraday_margin_setting failed. error: {}", e.what());
+    }
+    return false;
+}
+
+bool CoinbaseRestClient::allocate_portfolio(std::string_view portfolio_uuid, std::string_view symbol, double amount, std::string_view currency) const {
+    try {
+        json body {
+            {"portfolio_uuid", portfolio_uuid},
+            {"symbol", symbol},
+            {"amount", std::to_string(amount)},
+            {"currency", currency},
+        };
+        auto res = Http::post(std::format("{}/api/v3/brokerage/intx/allocate", base_url_), body.dump(), {
+            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("POST {}/api/v3/brokerage/intx/allocate", domain_).c_str())},
+            {"Content-Type", "application/json"}
+        });
+        if (res.is_ok()) {
+            return true;
+        }
+        LOG_ERROR("allocate_portfolio failed. error: {}", res.result_text);
+    }
+    catch (const std::exception &e) {
+        LOG_ERROR("allocate_portfolio failed. error: {}", e.what());
+    }
+    return false;
+}
+
+PerpsPortfolioSummaryResponse CoinbaseRestClient::get_perps_portfolio_summary(std::string_view portfolio_uuid) const {
+    try {
+        auto res = Http::get(std::format("{}/api/v3/brokerage/intx/portfolio/{}", base_url_, portfolio_uuid), {
+            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/intx/portfolio/{}", domain_, portfolio_uuid).c_str())}
+        });
+        if (res.is_ok()) {
+            auto j = json::parse(res.result_text);
+            return j.get<PerpsPortfolioSummaryResponse>();
+        }
+        LOG_ERROR("get_perps_portfolio_summary failed. portfolio_uuid: {}, error: {}", portfolio_uuid, res.result_text);
+    }
+    catch (const std::exception &e) {
+        LOG_ERROR("get_perps_portfolio_summary failed. portfolio_uuid: {}, error: {}", portfolio_uuid, e.what());
+    }
+    return {};
+}
+
+PerpsPositionsResponse CoinbaseRestClient::list_perps_positions(std::string_view portfolio_uuid) const {
+    try {
+        auto res = Http::get(std::format("{}/api/v3/brokerage/intx/positions/{}", base_url_, portfolio_uuid), {
+            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/intx/positions/{}", domain_, portfolio_uuid).c_str())}
+        });
+        if (res.is_ok()) {
+            auto j = json::parse(res.result_text);
+            return j.get<PerpsPositionsResponse>();
+        }
+        LOG_ERROR("list_perps_positions failed. portfolio_uuid: {}, error: {}", portfolio_uuid, res.result_text);
+    }
+    catch (const std::exception &e) {
+        LOG_ERROR("list_perps_positions failed. portfolio_uuid: {}, error: {}", portfolio_uuid, e.what());
+    }
+    return {};
+}
+
+PerpsPosition CoinbaseRestClient::get_perps_position(std::string_view portfolio_uuid, std::string_view symbol) const {
+    try {
+        auto res = Http::get(std::format("{}/api/v3/brokerage/intx/positions/{}/{}", base_url_, portfolio_uuid, symbol), {
+            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/intx/positions/{}/{}", domain_, portfolio_uuid, symbol).c_str())}
+        });
+        if (res.is_ok()) {
+            auto j = json::parse(res.result_text);
+            return j["position"].get<PerpsPosition>();
+        }
+        LOG_ERROR("get_perps_position failed. portfolio_uuid: {}, symbol: {}, error: {}", portfolio_uuid, symbol, res.result_text);
+    }
+    catch (const std::exception &e) {
+        LOG_ERROR("get_perps_position failed. portfolio_uuid: {}, symbol: {}, error: {}", portfolio_uuid, symbol, e.what());
+    }
+    return {};
+}
+
+std::vector<PerpsPortfolioBalance> CoinbaseRestClient::get_perps_portfolio_balances(std::string_view portfolio_uuid) const {
+    try {
+        auto res = Http::get(std::format("{}/api/v3/brokerage/intx/balances/{}", base_url_, portfolio_uuid), {
+            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/intx/balances/{}", domain_, portfolio_uuid).c_str())}
+        });
+        if (res.is_ok()) {
+            auto j = json::parse(res.result_text);
+            return j["portfolio_balances"];
+        }
+        LOG_ERROR("get_perps_portfolio_balances failed. portfolio_uuid: {}, error: {}", portfolio_uuid, res.result_text);
+    }
+    catch (const std::exception &e) {
+        LOG_ERROR("get_perps_portfolio_balances failed. portfolio_uuid: {}, error: {}", portfolio_uuid, e.what());
+    }
+    return {};
+}
+
+bool CoinbaseRestClient::opt_in_or_out_multi_asset_collateral(std::string_view portfolio_uuid, bool enabled) const {
+    try {
+        json body {
+            {"portfolio_uuid", portfolio_uuid},
+            {"multi_asset_collateral_enabled", enabled},
+        };
+        auto res = Http::post(std::format("{}/api/v3/brokerage/intx/multi_asset_collateral", base_url_), body.dump(), {
+            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("POST {}/api/v3/brokerage/intx/multi_asset_collateral", domain_).c_str())},
+            {"Content-Type", "application/json"}
+        });
+        if (res.is_ok()) {
+            return true;
+        }
+        LOG_ERROR("opt_in_or_out_multi_asset_collateral failed. error: {}", res.result_text);
+    }
+    catch (const std::exception &e) {
+        LOG_ERROR("opt_in_or_out_multi_asset_collateral failed. error: {}", e.what());
+    }
+    return false;
+}
+
 }   // end namespace coinbase

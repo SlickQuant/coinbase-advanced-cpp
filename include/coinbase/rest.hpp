@@ -20,6 +20,12 @@
 #include <coinbase/price_book.hpp>
 #include <coinbase/trades.hpp>
 #include <coinbase/candle.hpp>
+#include <coinbase/portfolio.hpp>
+#include <coinbase/convert.hpp>
+#include <coinbase/payment_method.hpp>
+#include <coinbase/key_permissions.hpp>
+#include <coinbase/futures.hpp>
+#include <coinbase/perpetuals.hpp>
 
 using json = nlohmann::json;
 
@@ -90,7 +96,46 @@ public:
     ) const;
 
     std::vector<CancelOrderResponse> cancel_orders(const std::vector<std::string_view> &order_ids) const;
-    
+
+    // Portfolios
+    std::vector<Portfolio> list_portfolios(std::optional<PortfolioType> portfolio_type = {}) const;
+    Portfolio create_portfolio(std::string_view name) const;
+    PortfolioBreakdown get_portfolio_breakdown(std::string_view portfolio_uuid, std::optional<std::string_view> currency = {}) const;
+    MovePortfolioFundsResult move_portfolio_funds(double value, std::string_view currency, std::string_view source_portfolio_uuid, std::string_view target_portfolio_uuid) const;
+    Portfolio edit_portfolio(std::string_view portfolio_uuid, std::string_view name) const;
+    bool delete_portfolio(std::string_view portfolio_uuid) const;
+
+    // Convert
+    ConvertTrade create_convert_quote(std::string_view from_account, std::string_view to_account, double amount) const;
+    ConvertTrade get_convert_trade(std::string_view trade_id, std::string_view from_account, std::string_view to_account) const;
+    ConvertTrade commit_convert_trade(std::string_view trade_id, std::string_view from_account, std::string_view to_account) const;
+
+    // Payment Methods
+    std::vector<PaymentMethod> list_payment_methods() const;
+    PaymentMethod get_payment_method(std::string_view payment_method_id) const;
+
+    // Data API
+    ApiKeyPermissions get_api_key_permissions() const;
+
+    // Futures (CFM)
+    FCMBalanceSummary get_futures_balance_summary() const;
+    std::vector<FCMPosition> list_futures_positions() const;
+    FCMPosition get_futures_position(std::string_view product_id) const;
+    bool schedule_futures_sweep(double usd_amount) const;
+    std::vector<FCMSweep> list_futures_sweeps() const;
+    bool cancel_pending_futures_sweep() const;
+    std::string get_intraday_margin_setting() const;
+    CurrentMarginWindow get_current_margin_window(std::string_view margin_profile_type) const;
+    bool set_intraday_margin_setting(std::string_view setting) const;
+
+    // Perpetuals (INTX)
+    bool allocate_portfolio(std::string_view portfolio_uuid, std::string_view symbol, double amount, std::string_view currency) const;
+    PerpsPortfolioSummaryResponse get_perps_portfolio_summary(std::string_view portfolio_uuid) const;
+    PerpsPositionsResponse list_perps_positions(std::string_view portfolio_uuid) const;
+    PerpsPosition get_perps_position(std::string_view portfolio_uuid, std::string_view symbol) const;
+    std::vector<PerpsPortfolioBalance> get_perps_portfolio_balances(std::string_view portfolio_uuid) const;
+    bool opt_in_or_out_multi_asset_collateral(std::string_view portfolio_uuid, bool enabled) const;
+
     static const Product& product(std::string_view product_id);
 private:
     std::string base_url_;

@@ -7,6 +7,10 @@
 #include <cstdint>
 #include <string_view>
 #include <string>
+#include <nlohmann/json.hpp>
+#include <coinbase/utils.hpp>
+
+using json = nlohmann::json;
 
 namespace coinbase {
 
@@ -38,6 +42,16 @@ inline std::string to_string(ContractExpiryType cet) {
         return "PERPETUAL";
     }
     return "UNKNOWN_CONTRACT_EXPIRY_TYPE";
+}
+
+struct Amount {
+    double value;
+    std::string currency;
+};
+
+inline void from_json(const json &j, Amount &a) {
+    DOUBLE_FROM_JSON(j, a, value);
+    VARIABLE_FROM_JSON(j, a, currency);
 }
 
 struct Commission {

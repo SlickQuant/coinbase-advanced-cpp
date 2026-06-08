@@ -20,6 +20,12 @@
 #include <coinbase/price_book.hpp>
 #include <coinbase/trades.hpp>
 #include <coinbase/candle.hpp>
+#include <coinbase/portfolio.hpp>
+#include <coinbase/convert.hpp>
+#include <coinbase/payment_method.hpp>
+#include <coinbase/key_permissions.hpp>
+#include <coinbase/futures.hpp>
+#include <coinbase/perpetuals.hpp>
 
 using json = nlohmann::json;
 namespace asio = boost::asio;
@@ -94,7 +100,46 @@ public:
     ) const;
 
     asio::awaitable<std::vector<CancelOrderResponse>> cancel_orders(const std::vector<std::string_view> &order_ids) const;
-    
+
+    // Portfolios
+    asio::awaitable<std::vector<Portfolio>> list_portfolios(std::optional<PortfolioType> portfolio_type = {}) const;
+    asio::awaitable<Portfolio> create_portfolio(std::string_view name) const;
+    asio::awaitable<PortfolioBreakdown> get_portfolio_breakdown(std::string_view portfolio_uuid, std::optional<std::string_view> currency = {}) const;
+    asio::awaitable<MovePortfolioFundsResult> move_portfolio_funds(double value, std::string_view currency, std::string_view source_portfolio_uuid, std::string_view target_portfolio_uuid) const;
+    asio::awaitable<Portfolio> edit_portfolio(std::string_view portfolio_uuid, std::string_view name) const;
+    asio::awaitable<bool> delete_portfolio(std::string_view portfolio_uuid) const;
+
+    // Convert
+    asio::awaitable<ConvertTrade> create_convert_quote(std::string_view from_account, std::string_view to_account, double amount) const;
+    asio::awaitable<ConvertTrade> get_convert_trade(std::string_view trade_id, std::string_view from_account, std::string_view to_account) const;
+    asio::awaitable<ConvertTrade> commit_convert_trade(std::string_view trade_id, std::string_view from_account, std::string_view to_account) const;
+
+    // Payment Methods
+    asio::awaitable<std::vector<PaymentMethod>> list_payment_methods() const;
+    asio::awaitable<PaymentMethod> get_payment_method(std::string_view payment_method_id) const;
+
+    // Data API
+    asio::awaitable<ApiKeyPermissions> get_api_key_permissions() const;
+
+    // Futures (CFM)
+    asio::awaitable<FCMBalanceSummary> get_futures_balance_summary() const;
+    asio::awaitable<std::vector<FCMPosition>> list_futures_positions() const;
+    asio::awaitable<FCMPosition> get_futures_position(std::string_view product_id) const;
+    asio::awaitable<bool> schedule_futures_sweep(double usd_amount) const;
+    asio::awaitable<std::vector<FCMSweep>> list_futures_sweeps() const;
+    asio::awaitable<bool> cancel_pending_futures_sweep() const;
+    asio::awaitable<std::string> get_intraday_margin_setting() const;
+    asio::awaitable<CurrentMarginWindow> get_current_margin_window(std::string_view margin_profile_type) const;
+    asio::awaitable<bool> set_intraday_margin_setting(std::string_view setting) const;
+
+    // Perpetuals (INTX)
+    asio::awaitable<bool> allocate_portfolio(std::string_view portfolio_uuid, std::string_view symbol, double amount, std::string_view currency) const;
+    asio::awaitable<PerpsPortfolioSummaryResponse> get_perps_portfolio_summary(std::string_view portfolio_uuid) const;
+    asio::awaitable<PerpsPositionsResponse> list_perps_positions(std::string_view portfolio_uuid) const;
+    asio::awaitable<PerpsPosition> get_perps_position(std::string_view portfolio_uuid, std::string_view symbol) const;
+    asio::awaitable<std::vector<PerpsPortfolioBalance>> get_perps_portfolio_balances(std::string_view portfolio_uuid) const;
+    asio::awaitable<bool> opt_in_or_out_multi_asset_collateral(std::string_view portfolio_uuid, bool enabled) const;
+
     static const Product& product(std::string_view product_id);
 private:
     std::string base_url_;

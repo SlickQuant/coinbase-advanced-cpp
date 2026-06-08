@@ -27,22 +27,29 @@ The SDK is organized into several key components:
 
 ```
 include/coinbase/
-├── account.h          # Account and balance management
-├── auth.h             # Authentication utilities
-├── candle.h           # Candlestick data
-├── common.h           # Common types and enums
-├── fill.h             # Fill data
-├── market_data.h      # Market data structures
-├── order.h            # Order management
-├── position.h         # Position management
-├── price_book.h       # Price book data
-├── product.h          # Product information
-├── rest.h             # REST client implementation
-├── rest_awaitable.h   # Async REST operations
-├── side.h             # Order side definitions
-├── trades.h           # Trade data
-├── utils.h            # Utility functions
-└── websocket.h        # WebSocket client implementation
+├── account.hpp          # Account and balance management
+├── auth.hpp             # Authentication utilities
+├── candle.hpp           # Candlestick data
+├── common.hpp           # Common types and enums
+├── convert.hpp          # Currency conversion (Convert) data models
+├── fill.hpp             # Fill data
+├── futures.hpp          # Futures (CFM) data models
+├── key_permissions.hpp  # API key permissions (Data API) data models
+├── logging.hpp          # Logging utilities
+├── market_data.hpp      # Market data structures
+├── order.hpp            # Order management
+├── payment_method.hpp   # Payment methods data models
+├── perpetuals.hpp       # Perpetuals (INTX) data models
+├── portfolio.hpp        # Portfolios data models
+├── position.hpp         # Position management
+├── price_book.hpp       # Price book data
+├── product.hpp          # Product information
+├── rest.hpp             # REST client implementation
+├── rest_awaitable.hpp   # Async REST operations
+├── side.hpp             # Order side definitions
+├── trades.hpp           # Trade data
+├── utils.hpp            # Utility functions
+└── websocket.hpp        # WebSocket client implementation
 ```
 
 ## Installation
@@ -84,7 +91,7 @@ cmake --build build
 #### REST Client
 
 ```cpp
-#include <coinbase/rest.h>
+#include <coinbase/rest.hpp>
 
 // Create client
 coinbase::CoinbaseRestClient client;
@@ -112,6 +119,34 @@ auto response = client.create_order(
 
 // Cancel order
 auto cancel_response = client.cancel_orders({"order_id_123"});
+
+// Portfolios
+auto portfolios = client.list_portfolios();
+auto breakdown = client.get_portfolio_breakdown(portfolios.front().uuid);
+
+// Convert (quote only - commit_convert_trade executes a real conversion)
+auto quote = client.create_convert_quote(from_account_uuid, to_account_uuid, 10.0);
+
+// Futures (CFM)
+auto balance_summary = client.get_futures_balance_summary();
+auto positions = client.list_futures_positions();
+```
+
+#### Async REST Client
+
+`CoinbaseAwaitableRestClient` mirrors every `CoinbaseRestClient` method as a C++20 coroutine returning `asio::awaitable<T>`, so the same endpoints (including all of the ones listed in [API Endpoints](#api-endpoints)) can be awaited from coroutine-based code:
+
+```cpp
+#include <coinbase/rest_awaitable.hpp>
+
+coinbase::CoinbaseAwaitableRestClient client;
+
+asio::awaitable<void> run() {
+    auto accounts = co_await client.list_accounts();
+    auto portfolios = co_await client.list_portfolios();
+    auto permissions = co_await client.get_api_key_permissions();
+    // ...
+}
 ```
 
 #### WebSocket Client
@@ -125,7 +160,7 @@ The SDK provides two callback mechanisms for handling WebSocket data:
 ##### Using WebsocketCallbacks (WebSocket Thread)
 
 ```cpp
-#include <coinbase/websocket.h>
+#include <coinbase/websocket.hpp>
 
 class MyCallbacks : public coinbase::WebsocketCallbacks {
 public:
@@ -193,7 +228,7 @@ client.stop();
 ##### Using UserThreadWebsocketCallbacks (User Thread)
 
 ```cpp
-#include <coinbase/websocket.h>
+#include <coinbase/websocket.hpp>
 
 class MyCallbacks : public coinbase::UserThreadWebsocketCallbacks {
 public:
@@ -244,8 +279,17 @@ client.stop();
 - **Products**: List products, get product details
 - **Orders**: Create, list, get, modify, and cancel orders
 - **Fills**: List fills
+- **Fees**: Get taker and maker fee rates
 - **Market Data**: Get best bid/ask, price book, market trades, candles
 - **Time**: Get server time
+- **Portfolios**: List portfolios, create/edit/delete a portfolio, get portfolio breakdown, move funds between portfolios
+- **Convert**: Create a convert quote, get a convert trade, commit a convert trade
+- **Payment Methods**: List payment methods, get payment method details
+- **Data API**: Get API key permissions
+- **Futures (CFM)**: Get balance summary, list/get positions, schedule/list/cancel sweeps, get/set intraday margin settings, get current margin window
+- **Perpetuals (INTX)**: Allocate portfolio, get portfolio summary, list/get positions, get portfolio balances, opt in/out of multi-asset collateral
+
+All REST endpoints are available on both the synchronous `CoinbaseRestClient` and the coroutine-based `CoinbaseAwaitableRestClient` (see [Async REST Client](#async-rest-client)).
 
 ### WebSocket API
 

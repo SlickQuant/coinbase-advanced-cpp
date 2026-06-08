@@ -180,4 +180,112 @@ asio::awaitable<std::vector<CancelOrderResponse>> CoinbaseAwaitableRestClient::c
     co_return sync_client_->cancel_orders(order_ids);
 }
 
+asio::awaitable<std::vector<Portfolio>> CoinbaseAwaitableRestClient::list_portfolios(std::optional<PortfolioType> portfolio_type) const {
+    co_return sync_client_->list_portfolios(portfolio_type);
+}
+
+asio::awaitable<Portfolio> CoinbaseAwaitableRestClient::create_portfolio(std::string_view name) const {
+    co_return sync_client_->create_portfolio(name);
+}
+
+asio::awaitable<PortfolioBreakdown> CoinbaseAwaitableRestClient::get_portfolio_breakdown(std::string_view portfolio_uuid, std::optional<std::string_view> currency) const {
+    co_return sync_client_->get_portfolio_breakdown(portfolio_uuid, currency);
+}
+
+asio::awaitable<MovePortfolioFundsResult> CoinbaseAwaitableRestClient::move_portfolio_funds(double value, std::string_view currency, std::string_view source_portfolio_uuid, std::string_view target_portfolio_uuid) const {
+    co_return sync_client_->move_portfolio_funds(value, currency, source_portfolio_uuid, target_portfolio_uuid);
+}
+
+asio::awaitable<Portfolio> CoinbaseAwaitableRestClient::edit_portfolio(std::string_view portfolio_uuid, std::string_view name) const {
+    co_return sync_client_->edit_portfolio(portfolio_uuid, name);
+}
+
+asio::awaitable<bool> CoinbaseAwaitableRestClient::delete_portfolio(std::string_view portfolio_uuid) const {
+    co_return sync_client_->delete_portfolio(portfolio_uuid);
+}
+
+asio::awaitable<ConvertTrade> CoinbaseAwaitableRestClient::create_convert_quote(std::string_view from_account, std::string_view to_account, double amount) const {
+    co_return sync_client_->create_convert_quote(from_account, to_account, amount);
+}
+
+asio::awaitable<ConvertTrade> CoinbaseAwaitableRestClient::get_convert_trade(std::string_view trade_id, std::string_view from_account, std::string_view to_account) const {
+    co_return sync_client_->get_convert_trade(trade_id, from_account, to_account);
+}
+
+asio::awaitable<ConvertTrade> CoinbaseAwaitableRestClient::commit_convert_trade(std::string_view trade_id, std::string_view from_account, std::string_view to_account) const {
+    co_return sync_client_->commit_convert_trade(trade_id, from_account, to_account);
+}
+
+asio::awaitable<std::vector<PaymentMethod>> CoinbaseAwaitableRestClient::list_payment_methods() const {
+    co_return sync_client_->list_payment_methods();
+}
+
+asio::awaitable<PaymentMethod> CoinbaseAwaitableRestClient::get_payment_method(std::string_view payment_method_id) const {
+    co_return sync_client_->get_payment_method(payment_method_id);
+}
+
+asio::awaitable<ApiKeyPermissions> CoinbaseAwaitableRestClient::get_api_key_permissions() const {
+    co_return sync_client_->get_api_key_permissions();
+}
+
+asio::awaitable<FCMBalanceSummary> CoinbaseAwaitableRestClient::get_futures_balance_summary() const {
+    co_return sync_client_->get_futures_balance_summary();
+}
+
+asio::awaitable<std::vector<FCMPosition>> CoinbaseAwaitableRestClient::list_futures_positions() const {
+    co_return sync_client_->list_futures_positions();
+}
+
+asio::awaitable<FCMPosition> CoinbaseAwaitableRestClient::get_futures_position(std::string_view product_id) const {
+    co_return sync_client_->get_futures_position(product_id);
+}
+
+asio::awaitable<bool> CoinbaseAwaitableRestClient::schedule_futures_sweep(double usd_amount) const {
+    co_return sync_client_->schedule_futures_sweep(usd_amount);
+}
+
+asio::awaitable<std::vector<FCMSweep>> CoinbaseAwaitableRestClient::list_futures_sweeps() const {
+    co_return sync_client_->list_futures_sweeps();
+}
+
+asio::awaitable<bool> CoinbaseAwaitableRestClient::cancel_pending_futures_sweep() const {
+    co_return sync_client_->cancel_pending_futures_sweep();
+}
+
+asio::awaitable<std::string> CoinbaseAwaitableRestClient::get_intraday_margin_setting() const {
+    co_return sync_client_->get_intraday_margin_setting();
+}
+
+asio::awaitable<CurrentMarginWindow> CoinbaseAwaitableRestClient::get_current_margin_window(std::string_view margin_profile_type) const {
+    co_return sync_client_->get_current_margin_window(margin_profile_type);
+}
+
+asio::awaitable<bool> CoinbaseAwaitableRestClient::set_intraday_margin_setting(std::string_view setting) const {
+    co_return sync_client_->set_intraday_margin_setting(setting);
+}
+
+asio::awaitable<bool> CoinbaseAwaitableRestClient::allocate_portfolio(std::string_view portfolio_uuid, std::string_view symbol, double amount, std::string_view currency) const {
+    co_return sync_client_->allocate_portfolio(portfolio_uuid, symbol, amount, currency);
+}
+
+asio::awaitable<PerpsPortfolioSummaryResponse> CoinbaseAwaitableRestClient::get_perps_portfolio_summary(std::string_view portfolio_uuid) const {
+    co_return sync_client_->get_perps_portfolio_summary(portfolio_uuid);
+}
+
+asio::awaitable<PerpsPositionsResponse> CoinbaseAwaitableRestClient::list_perps_positions(std::string_view portfolio_uuid) const {
+    co_return sync_client_->list_perps_positions(portfolio_uuid);
+}
+
+asio::awaitable<PerpsPosition> CoinbaseAwaitableRestClient::get_perps_position(std::string_view portfolio_uuid, std::string_view symbol) const {
+    co_return sync_client_->get_perps_position(portfolio_uuid, symbol);
+}
+
+asio::awaitable<std::vector<PerpsPortfolioBalance>> CoinbaseAwaitableRestClient::get_perps_portfolio_balances(std::string_view portfolio_uuid) const {
+    co_return sync_client_->get_perps_portfolio_balances(portfolio_uuid);
+}
+
+asio::awaitable<bool> CoinbaseAwaitableRestClient::opt_in_or_out_multi_asset_collateral(std::string_view portfolio_uuid, bool enabled) const {
+    co_return sync_client_->opt_in_or_out_multi_asset_collateral(portfolio_uuid, enabled);
+}
+
 }   // end namespace coinbase

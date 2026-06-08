@@ -5,10 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [unreleased]
+## [0.3.0] - 2026-06-08
 
 ### Added
 - taker_fee_rate and maker_fee_rate in REST api.
+- Portfolios endpoints: `list_portfolios`, `create_portfolio`, `get_portfolio_breakdown`, `move_portfolio_funds`, `edit_portfolio`, `delete_portfolio`
+- Convert endpoints: `create_convert_quote`, `get_convert_trade`, `commit_convert_trade`
+- Payment Methods endpoints: `list_payment_methods`, `get_payment_method`
+- Data API endpoint: `get_api_key_permissions`
+- Futures (CFM) endpoints: `get_futures_balance_summary`, `list_futures_positions`, `get_futures_position`, `schedule_futures_sweep`, `list_futures_sweeps`, `cancel_pending_futures_sweep`, `get_intraday_margin_setting`, `get_current_margin_window`, `set_intraday_margin_setting`
+- Perpetuals (INTX) endpoints: `allocate_portfolio`, `get_perps_portfolio_summary`, `list_perps_positions`, `get_perps_position`, `get_perps_portfolio_balances`, `opt_in_or_out_multi_asset_collateral`
+- Async mirrors of all the above in `CoinbaseAwaitableRestClient`, plus new data model headers (`portfolio.hpp`, `convert.hpp`, `payment_method.hpp`, `key_permissions.hpp`, `futures.hpp`, `perpetuals.hpp`) and `Amount` type in `common.hpp`
 
 ### Changed
 - Change log file opening mode to append for data logging
@@ -23,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - `unsubscribe()` now holds a reference to the `unique_ptr` instead of copying it
+- `double_from_json` now handles fields the API returns as raw JSON numbers (not just stringified numbers), fixing parsing of `PortfolioPosition.allocation`/`available_to_trade_fiat`
 
 ## [0.2.2] - 2026-03-05
 

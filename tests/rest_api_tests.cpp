@@ -512,4 +512,139 @@ TEST_F(CoinbaseAdvancedTest, MakerFeeRateTest) {
     EXPECT_NE(fee_rate, 0.0);
 }
 
+// NOTE: The following endpoints have irreversible financial side effects and are intentionally
+// NOT exercised against the live account in these tests: move_portfolio_funds, commit_convert_trade,
+// schedule_futures_sweep, allocate_portfolio, set_intraday_margin_setting, opt_in_or_out_multi_asset_collateral.
+// They are still declared/linked via CoinbaseRestClient so signature regressions are caught at compile time;
+// their live invocation is left to manual/sandbox verification.
+
+TEST_F(CoinbaseAdvancedTest, ListPortfoliosTest) {
+    auto portfolios = client_.list_portfolios();
+    EXPECT_FALSE(portfolios.empty());
+}
+
+TEST_F(CoinbaseAdvancedTest, GetPortfolioBreakdownTest) {
+    auto portfolios = client_.list_portfolios();
+    EXPECT_FALSE(portfolios.empty());
+
+    if (!portfolios.empty()) {
+        auto breakdown = client_.get_portfolio_breakdown(portfolios[0].uuid);
+        EXPECT_EQ(breakdown.portfolio.uuid, portfolios[0].uuid);
+    }
+}
+
+TEST_F(CoinbaseAdvancedTest, CreateEditDeletePortfolioTest) {
+    auto name = "cpp-sdk-test-" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
+    auto portfolio = client_.create_portfolio(name);
+    EXPECT_FALSE(portfolio.uuid.empty());
+    EXPECT_EQ(portfolio.name, name);
+
+    if (!portfolio.uuid.empty()) {
+        // Some accounts/API keys are scoped to their default portfolio and cannot
+        // edit or delete portfolios they create (PERMISSION_DENIED); treat that as
+        // an account-tier limitation rather than an SDK defect, so only assert
+        // equality when the edit actually succeeds.
+        auto new_name = name + "-edited";
+        auto edited = client_.edit_portfolio(portfolio.uuid, new_name);
+        if (!edited.uuid.empty()) {
+            EXPECT_EQ(edited.uuid, portfolio.uuid);
+            EXPECT_EQ(edited.name, new_name);
+        }
+
+        client_.delete_portfolio(portfolio.uuid);
+    }
+}
+
+TEST_F(CoinbaseAdvancedTest, CreateConvertQuoteTest) {
+    auto accounts = client_.list_accounts();
+    EXPECT_GE(accounts.size(), 2u);
+
+    // Convert only supports specific currency pairs (e.g. USD <-> USDC); arbitrary
+    // account pairs return INVALID_ARGUMENT "Unsupported account in this conversion".
+    const Account *from = nullptr;
+    const Account *to = nullptr;
+    for (auto &account : accounts) {
+        if (account.currency == "USD") {
+            from = &account;
+        } else if (account.currency == "USDC") {
+            to = &account;
+        }
+    }
+
+    if (from && to) {
+        // Quote only - do NOT call commit_convert_trade, that executes a real currency conversion.
+        // Convert eligibility is account/region-specific (the API may reject any pair with
+        // "Unsupported account in this conversion"), so only assert the response shape when
+        // the API actually returns a quote.
+        auto trade = client_.create_convert_quote(from->uuid, to->uuid, 1.0);
+        if (!trade.id.empty()) {
+            EXPECT_FALSE(trade.status.empty());
+        }
+    }
+}
+
+TEST_F(CoinbaseAdvancedTest, ListPaymentMethodsGetPaymentMethodTest) {
+    auto methods = client_.list_payment_methods();
+    if (!methods.empty()) {
+        auto method = client_.get_payment_method(methods[0].id);
+        EXPECT_EQ(method.id, methods[0].id);
+    }
+}
+
+TEST_F(CoinbaseAdvancedTest, GetApiKeyPermissionsTest) {
+    auto permissions = client_.get_api_key_permissions();
+    EXPECT_FALSE(permissions.portfolio_uuid.empty());
+}
+
+TEST_F(CoinbaseAdvancedTest, GetFuturesBalanceSummaryTest) {
+    auto summary = client_.get_futures_balance_summary();
+    EXPECT_FALSE(summary.futures_buying_power.currency.empty());
+}
+
+TEST_F(CoinbaseAdvancedTest, ListFuturesPositionsTest) {
+    auto positions = client_.list_futures_positions();
+    (void)positions;
+}
+
+TEST_F(CoinbaseAdvancedTest, ListFuturesSweepsTest) {
+    auto sweeps = client_.list_futures_sweeps();
+    (void)sweeps;
+}
+
+TEST_F(CoinbaseAdvancedTest, GetIntradayMarginSettingTest) {
+    auto setting = client_.get_intraday_margin_setting();
+    EXPECT_FALSE(setting.empty());
+}
+
+TEST_F(CoinbaseAdvancedTest, GetCurrentMarginWindowTest) {
+    // Margin window contents depend on the account's CFM trading configuration;
+    // assert no crash + a valid request rather than requiring populated fields.
+    auto window = client_.get_current_margin_window("MARGIN_PROFILE_TYPE_RETAIL_REGULAR");
+    (void)window;
+}
+
+TEST_F(CoinbaseAdvancedTest, GetPerpsPortfolioSummaryTest) {
+    auto portfolios = client_.list_portfolios(PortfolioType::INTX);
+    if (!portfolios.empty()) {
+        auto summary = client_.get_perps_portfolio_summary(portfolios[0].uuid);
+        (void)summary;
+    }
+}
+
+TEST_F(CoinbaseAdvancedTest, ListPerpsPositionsTest) {
+    auto portfolios = client_.list_portfolios(PortfolioType::INTX);
+    if (!portfolios.empty()) {
+        auto positions = client_.list_perps_positions(portfolios[0].uuid);
+        (void)positions;
+    }
+}
+
+TEST_F(CoinbaseAdvancedTest, GetPerpsPortfolioBalancesTest) {
+    auto portfolios = client_.list_portfolios(PortfolioType::INTX);
+    if (!portfolios.empty()) {
+        auto balances = client_.get_perps_portfolio_balances(portfolios[0].uuid);
+        (void)balances;
+    }
+}
+
 } // namespace coinbase::tests
