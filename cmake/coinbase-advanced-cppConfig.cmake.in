@@ -2,10 +2,10 @@
 
 include(CMakeFindDependencyMacro)
 
-find_dependency(nlohmann_json CONFIG REQUIRED)
-find_dependency(OpenSSL CONFIG REQUIRED)
-find_dependency(jwt-cpp CONFIG REQUIRED)
-find_dependency(slick-net 1.2.4 CONFIG QUIET)
+find_dependency(nlohmann_json CONFIG)
+find_dependency(OpenSSL CONFIG)
+find_dependency(jwt-cpp CONFIG)
+find_dependency(slick-net 2.1.0 CONFIG)
 
 if(NOT slick-net_FOUND)
     message(STATUS "Fetching slick-net...")
@@ -15,7 +15,7 @@ if(NOT slick-net_FOUND)
     FetchContent_Declare(
         slick-net
         GIT_REPOSITORY https://github.com/SlickQuant/slick-net.git
-        GIT_TAG v1.2.4
+        GIT_TAG v2.1.0
     )
     FetchContent_MakeAvailable(slick-net)
 endif()
