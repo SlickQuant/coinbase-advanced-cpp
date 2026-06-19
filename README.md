@@ -4,7 +4,6 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Static Library](https://img.shields.io/badge/library-static-brightgreen.svg)](#installation)
 [![Lock-free](https://img.shields.io/badge/concurrency-lock--free-orange.svg)](#architecture)
-[![GitHub release](https://img.shields.io/github/v/release/SlickQuant/slick-logger)](https://github.com/SlickQuant/slick-logger/releases)
 
 A modern C++ SDK for interacting with the Coinbase Advanced API, providing both REST and WebSocket functionality for trading, market data, and account management.
 
