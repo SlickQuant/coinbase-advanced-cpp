@@ -181,7 +181,6 @@ WebSocketClient::WebSocketClient(
     WebsocketCallbacks *callbacks,
     std::string_view market_data_url,
     std::string_view user_data_url,
-    uint32_t producer_offset,
     uint32_t md_read_buffer_size,
     uint32_t md_record_size,
     const char* md_read_buffer_shm_name,
@@ -194,7 +193,7 @@ WebSocketClient::WebSocketClient(
     , user_data_url_(user_data_url)
     , owning_mux_(new slick::stream_buffer_multiplexer(std::max(md_record_size, user_record_size) * 2))
     , mux_(*owning_mux_.get())
-    , producer_offset_(producer_offset)
+    , producer_offset_(0)
     , user_thread_callbacks_(dynamic_cast<UserThreadWebsocketCallbacks*>(callbacks))
 {
     init(

@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: ${{ matrix.os }} / ${{ matrix.build_type }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        build_type: [Debug, Release]
+
+    env:
+      VCPKG_DIR: ${{ github.workspace }}/vcpkg
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache vcpkg
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/vcpkg
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('**/CMakeLists.txt') }}
+          restore-keys: vcpkg-${{ runner.os }}-
+
+      - name: Bootstrap vcpkg (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          if [ ! -f "${{ env.VCPKG_DIR }}/vcpkg" ]; then
+            git clone https://github.com/microsoft/vcpkg.git "${{ env.VCPKG_DIR }}"
+            "${{ env.VCPKG_DIR }}/bootstrap-vcpkg.sh" -disableMetrics
+          fi
+          "${{ env.VCPKG_DIR }}/vcpkg" install nlohmann-json openssl jwt-cpp
+
+      - name: Bootstrap vcpkg (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vcpkgDir = "${{ env.VCPKG_DIR }}"
+          if (-not (Test-Path "$vcpkgDir\vcpkg.exe")) {
+            git clone https://github.com/microsoft/vcpkg.git $vcpkgDir
+            & "$vcpkgDir\bootstrap-vcpkg.bat" -disableMetrics
+          }
+          & "$vcpkgDir\vcpkg.exe" install nlohmann-json:x64-windows openssl:x64-windows jwt-cpp:x64-windows
+
+      - name: Configure (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DCMAKE_TOOLCHAIN_FILE="${{ env.VCPKG_DIR }}/scripts/buildsystems/vcpkg.cmake" \
+            -DBUILD_COINBASE_ADVANCED_TESTS=ON \
+            -DBUILD_COINBASE_ADVANCED_EXAMPLES=OFF
+
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cmake -S . -B build `
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} `
+            "-DCMAKE_TOOLCHAIN_FILE=${{ env.VCPKG_DIR }}\scripts\buildsystems\vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows `
+            -DBUILD_COINBASE_ADVANCED_TESTS=ON `
+            -DBUILD_COINBASE_ADVANCED_EXAMPLES=OFF
+
+      - name: Build
+        run: cmake --build build --config ${{ matrix.build_type }} -j 4
+
+      - name: Test
+        run: ctest --test-dir build -C ${{ matrix.build_type }} -E "(Order|Fill)" --output-on-failure
