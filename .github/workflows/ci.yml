@@ -86,4 +86,4 @@ jobs:
         run: cmake --build build --config ${{ matrix.build_type }} -j 4
 
       - name: Test
-        run: ctest --test-dir build -C ${{ matrix.build_type }} -E "(Order|Fill|Portfolio|Account|Permissions|Balance|Margin|ListProductsGetProductTest)" --output-on-failure
+        run: ctest --test-dir build -C ${{ matrix.build_type }} -E "(Order|Fill|Portfolio|Account|Permissions|Balance|Margin|ListProducts|UserChannel|DataLogger|GetBestBidAsk|GetPriceBook|GetMarketTrades|GetProductCandles|CreateConvertQuote|ConcurrentOperations)" --output-on-failure
