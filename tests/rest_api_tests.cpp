@@ -174,10 +174,12 @@ TEST_F(CoinbaseAdvancedTest, LimitOrderTests) {
         EXPECT_TRUE(rsp.success);
 
         if (rsp.success) {
-            order_ = client_.get_order(rsp.success_response.order_id);
+            do {
+                order_ = client_.get_order(rsp.success_response.order_id);
+            } while (order_.status == OrderStatus::PENDING);
             EXPECT_EQ(order_.order_id, rsp.success_response.order_id);
             EXPECT_EQ(order_.side, Side::BUY);
-            EXPECT_EQ(order_.status, OrderStatus::OPEN);
+            EXPECT_TRUE(order_.status == OrderStatus::OPEN);
 
             price -= 10000.0;
             auto modify_rsp = client_.modify_order(
@@ -188,10 +190,12 @@ TEST_F(CoinbaseAdvancedTest, LimitOrderTests) {
             );
 
             if (modify_rsp.success) {
-                order_ = client_.get_order(rsp.success_response.order_id);
+                do {
+                    order_ = client_.get_order(rsp.success_response.order_id);
+                } while (order_.status == OrderStatus::EDIT_QUEUED);
                 EXPECT_EQ(order_.order_id, rsp.success_response.order_id);
                 EXPECT_EQ(order_.side, Side::BUY);
-                EXPECT_EQ(order_.status, OrderStatus::OPEN);
+                EXPECT_TRUE(order_.status == OrderStatus::OPEN);
                 EXPECT_DOUBLE_EQ(order_.order_configuration.limit_limit_gtc.value().limit_price, price);
             }
 
@@ -265,10 +269,12 @@ TEST_F(CoinbaseAdvancedTest, LimitBracketOrderTests) {
         EXPECT_TRUE(rsp.success);
 
         if (rsp.success) {
-            order_ = client_.get_order(rsp.success_response.order_id);
+            do {
+                order_ = client_.get_order(rsp.success_response.order_id);
+            } while (order_.status == OrderStatus::PENDING);
             EXPECT_EQ(order_.order_id, rsp.success_response.order_id);
             EXPECT_EQ(order_.side, Side::SELL);
-            EXPECT_EQ(order_.status, OrderStatus::OPEN);
+            EXPECT_TRUE(order_.status == OrderStatus::OPEN);
             EXPECT_TRUE(order_.attached_order_configuration.trigger_bracket_gtc.has_value());
             EXPECT_DOUBLE_EQ(order_.attached_order_configuration.trigger_bracket_gtc->limit_price, price - 10000.0);
             EXPECT_DOUBLE_EQ(order_.attached_order_configuration.trigger_bracket_gtc->stop_trigger_price, price + 5000.0);
@@ -283,10 +289,12 @@ TEST_F(CoinbaseAdvancedTest, LimitBracketOrderTests) {
             );
 
             if (modify_rsp.success) {
-                order_ = client_.get_order(rsp.success_response.order_id);
+                do {
+                    order_ = client_.get_order(rsp.success_response.order_id);
+                } while (order_.status == OrderStatus::EDIT_QUEUED);
                 EXPECT_EQ(order_.order_id, rsp.success_response.order_id);
                 EXPECT_EQ(order_.side, Side::SELL);
-                EXPECT_EQ(order_.status, OrderStatus::OPEN);
+                EXPECT_TRUE(order_.status == OrderStatus::OPEN);
                 EXPECT_DOUBLE_EQ(order_.order_configuration.limit_limit_gtc.value().limit_price, price);
                 EXPECT_TRUE(order_.attached_order_configuration.trigger_bracket_gtc.has_value());
                 EXPECT_DOUBLE_EQ(order_.attached_order_configuration.trigger_bracket_gtc->stop_trigger_price, price + 10000.0);
@@ -343,10 +351,12 @@ TEST_F(CoinbaseAdvancedTest, BracketOrderTests) {
             EXPECT_TRUE(rsp.success);
 
             if (rsp.success) {
-                order_ = client_.get_order(rsp.success_response.order_id);
+                do {
+                    order_ = client_.get_order(rsp.success_response.order_id);
+                } while (order_.status == OrderStatus::PENDING);
                 EXPECT_EQ(order_.order_id, rsp.success_response.order_id);
                 EXPECT_EQ(order_.side, Side::SELL);
-                EXPECT_EQ(order_.status, OrderStatus::OPEN);
+                EXPECT_TRUE(order_.status == OrderStatus::OPEN);
                 EXPECT_TRUE(order_.order_configuration.trigger_bracket_gtc.has_value());
                 EXPECT_DOUBLE_EQ(order_.order_configuration.trigger_bracket_gtc->stop_trigger_price, price);
                 EXPECT_DOUBLE_EQ(order_.order_configuration.trigger_bracket_gtc->limit_price, price + 20000.0);
@@ -379,10 +389,12 @@ TEST_F(CoinbaseAdvancedTest, BracketOrderTests) {
         );
 
         if (rsp.success) {
-            order_ = client_.get_order(rsp.success_response.order_id);
+            do {
+                order_ = client_.get_order(rsp.success_response.order_id);
+            } while (order_.status == OrderStatus::PENDING);
             EXPECT_EQ(order_.order_id, rsp.success_response.order_id);
             EXPECT_EQ(order_.side, Side::SELL);
-            EXPECT_EQ(order_.status, OrderStatus::OPEN);
+            EXPECT_TRUE(order_.status == OrderStatus::OPEN);
             EXPECT_TRUE(order_.order_configuration.trigger_bracket_gtc.has_value());
             EXPECT_DOUBLE_EQ(order_.order_configuration.trigger_bracket_gtc->stop_trigger_price, price + 5000.0);
             EXPECT_DOUBLE_EQ(order_.order_configuration.trigger_bracket_gtc->limit_price, price - 6000.0);
@@ -397,10 +409,12 @@ TEST_F(CoinbaseAdvancedTest, BracketOrderTests) {
             );
 
             if (modify_rsp.success) {
-                order_ = client_.get_order(rsp.success_response.order_id);
+                do {
+                    order_ = client_.get_order(rsp.success_response.order_id);
+                } while (order_.status == OrderStatus::EDIT_QUEUED);
                 EXPECT_EQ(order_.order_id, rsp.success_response.order_id);
                 EXPECT_EQ(order_.side, Side::SELL);
-                EXPECT_EQ(order_.status, OrderStatus::OPEN);
+                EXPECT_TRUE(order_.status == OrderStatus::OPEN);
                 EXPECT_DOUBLE_EQ(order_.order_configuration.limit_limit_gtc.value().limit_price, price);
                 EXPECT_TRUE(order_.order_configuration.trigger_bracket_gtc.has_value());
                 EXPECT_DOUBLE_EQ(order_.order_configuration.trigger_bracket_gtc->stop_trigger_price, price + 10000.0);
@@ -432,10 +446,12 @@ TEST_F(CoinbaseAdvancedTest, BracketOrderTests) {
         EXPECT_FALSE(rsp.success);
 
         if (rsp.success) {
-            order_ = client_.get_order(rsp.success_response.order_id);
+            do {
+                order_ = client_.get_order(rsp.success_response.order_id);
+            } while (order_.status == OrderStatus::PENDING);
             EXPECT_EQ(order_.order_id, rsp.success_response.order_id);
             EXPECT_EQ(order_.side, Side::BUY);
-            EXPECT_EQ(order_.status, OrderStatus::OPEN);
+            EXPECT_TRUE(order_.status == OrderStatus::OPEN);
             EXPECT_TRUE(order_.order_configuration.trigger_bracket_gtc.has_value());
             EXPECT_DOUBLE_EQ(order_.order_configuration.trigger_bracket_gtc->stop_trigger_price, price - 5000.0);
             EXPECT_DOUBLE_EQ(order_.order_configuration.trigger_bracket_gtc->limit_price, price + 6000.0);
@@ -450,10 +466,12 @@ TEST_F(CoinbaseAdvancedTest, BracketOrderTests) {
             );
 
             if (modify_rsp.success) {
-                order_ = client_.get_order(rsp.success_response.order_id);
+                do {
+                    order_ = client_.get_order(rsp.success_response.order_id);
+                } while (order_.status == OrderStatus::EDIT_QUEUED);
                 EXPECT_EQ(order_.order_id, rsp.success_response.order_id);
                 EXPECT_EQ(order_.side, Side::BUY);
-                EXPECT_EQ(order_.status, OrderStatus::OPEN);
+                EXPECT_TRUE(order_.status == OrderStatus::OPEN);
                 EXPECT_DOUBLE_EQ(order_.order_configuration.limit_limit_gtc.value().limit_price, price);
                 EXPECT_TRUE(order_.order_configuration.trigger_bracket_gtc.has_value());
                 EXPECT_DOUBLE_EQ(order_.order_configuration.trigger_bracket_gtc->stop_trigger_price, price - 50000.0);

@@ -2,6 +2,7 @@
 #include <atomic>
 #include <cstdio>
 #include <filesystem>
+#include <type_traits>
 
 #include <slick/logger.hpp>
 #include <coinbase/logging.hpp>
@@ -23,7 +24,7 @@ namespace coinbase::tests {
             auto &logger = slick::logger::Logger::instance();
             logger.clear_sinks();
             logger.add_console_sink();
-            // logger.set_level(slick::logger::LogLevel::L_DEBUG);
+            logger.set_level(slick::logger::LogLevel::L_DEBUG);
             logger.init(1048576, 16777216);
             coinbase::logging::set_log_handler([&logger](slick::net::LogLevel level, const char* format_text, std::format_args args){
                 logger.log(static_cast<slick::logger::LogLevel>(level), format_text, args);
@@ -411,7 +412,13 @@ namespace coinbase::tests {
     }
 
     TEST_F(UserThreadWebSocketTests, MultipleClient) {
-        auto client2 = std::make_unique<WebSocketClient>(this);
+        auto client2 = std::make_unique<WebSocketClient>(
+            this,
+            client_->streamBufferMultiplexer(), // needs to be same mux
+            client_->marketDataUrl(),
+            client_->userDataUrl(),
+            ProducerType::_PRODUCER_TYPE_COUNT_ // producer_offset must be a multiple of _PRODUCER_TYPE_COUNT_ (4)
+        );
         client_->subscribe({"BTC-USD"}, {WebSocketChannel::LEVEL2});
         client2->subscribe({"ETH-USD"}, {WebSocketChannel::LEVEL2});
         while (!snapshot_received_.load(std::memory_order_relaxed)) {
@@ -435,6 +442,131 @@ namespace coinbase::tests {
         }
 
         EXPECT_EQ(md_gap_count_.load(std::memory_order_relaxed), 0u);
+    }
+
+    // -------------------------------------------------------------------------
+    // Unit tests for the stream_buffer_multiplexer refactor
+    // These run without a network connection and verify specific bug fixes.
+    // -------------------------------------------------------------------------
+
+    // Concrete UserThreadWebsocketCallbacks with no-op implementations of all
+    // pure-virtual callbacks — used by the unit tests that need an instantiable
+    // version without live network connections.
+    struct ConcreteUserThreadCallbacks : public UserThreadWebsocketCallbacks {
+        void onMarketDataConnected(WebSocketClient*) override {}
+        void onUserDataConnected(WebSocketClient*) override {}
+        void onMarketDataDisconnected(WebSocketClient*) override {}
+        void onUserDataDisconnected(WebSocketClient*) override {}
+        void onLevel2Snapshot(WebSocketClient*, uint64_t, const Level2UpdateBatch&) override {}
+        void onLevel2Updates(WebSocketClient*, uint64_t, const Level2UpdateBatch&) override {}
+        void onMarketTradesSnapshot(WebSocketClient*, uint64_t, const std::vector<MarketTrade>&) override {}
+        void onMarketTrades(WebSocketClient*, uint64_t, const std::vector<MarketTrade>&) override {}
+        void onTickerSnapshot(WebSocketClient*, uint64_t, uint64_t, const std::vector<Ticker>&) override {}
+        void onTickers(WebSocketClient*, uint64_t, uint64_t, const std::vector<Ticker>&) override {}
+        void onCandlesSnapshot(WebSocketClient*, uint64_t, uint64_t, const std::vector<Candle>&) override {}
+        void onCandles(WebSocketClient*, uint64_t, uint64_t, const std::vector<Candle>&) override {}
+        void onStatusSnapshot(WebSocketClient*, uint64_t, uint64_t, const std::vector<Status>&) override {}
+        void onStatus(WebSocketClient*, uint64_t, uint64_t, const std::vector<Status>&) override {}
+        void onMarketDataGap(WebSocketClient*) override {}
+        void onUserDataGap(WebSocketClient*) override {}
+        void onUserDataSnapshot(WebSocketClient*, uint64_t, const std::vector<Order>&,
+                                const std::vector<PerpetualFuturePosition>&,
+                                const std::vector<ExpiringFuturePosition>&) override {}
+        void onOrderUpdates(WebSocketClient*, uint64_t, const std::vector<Order>&) override {}
+        void onMarketDataError(WebSocketClient*, std::string&&) override {}
+        void onUserDataError(WebSocketClient*, std::string&&) override {}
+    };
+
+    // WebSocketClient must not be movable or copyable: mux_ is a reference member
+    // and move would leave the source with a dangling reference to the moved-from's mux.
+    TEST(WebSocketClientUnitTests, IsNotCopyableOrMovable) {
+        static_assert(!std::is_copy_constructible_v<WebSocketClient>);
+        static_assert(!std::is_move_constructible_v<WebSocketClient>);
+        static_assert(!std::is_copy_assignable_v<WebSocketClient>);
+        static_assert(!std::is_move_assignable_v<WebSocketClient>);
+        SUCCEED();
+    }
+
+    // ProducerType enum ordering is load-bearing: the -2 offset used to map CTRL
+    // producer_ids back to their DATA slots depends on MD_CTRL - MD_DATA == 2.
+    TEST(WebSocketClientUnitTests, ProducerTypeEnumOrdering) {
+        static_assert(ProducerType::MD_DATA   == 0);
+        static_assert(ProducerType::USER_DATA == 1);
+        static_assert(ProducerType::MD_CTRL   == 2);
+        static_assert(ProducerType::USER_CTRL == 3);
+        static_assert(ProducerType::_PRODUCER_TYPE_COUNT_ == 4);
+        static_assert((ProducerType::MD_CTRL  - ProducerType::MD_DATA) ==
+                      (ProducerType::USER_CTRL - ProducerType::USER_DATA));
+        SUCCEED();
+    }
+
+    // processData() must be a no-op when no WebSocketClient has been added yet
+    // (mux_ is null — the guard at the top of processData).
+    TEST(UserThreadWebsocketCallbacksUnitTests, ProcessDataIsNoOpWhenNotInitialized) {
+        ConcreteUserThreadCallbacks callbacks;
+        EXPECT_NO_THROW(callbacks.processData(100));
+    }
+
+    // streamBufferMultiplexer() must return the same object for the owning client
+    // and an injected client so the UserThread consumer reads all producers through
+    // a single mux.
+    TEST(WebSocketClientUnitTests, TwoClientsShareSameMux) {
+        ConcreteUserThreadCallbacks callbacks;
+        auto client1 = std::make_unique<WebSocketClient>(&callbacks, "", "");
+        auto client2 = std::make_unique<WebSocketClient>(
+            &callbacks,
+            client1->streamBufferMultiplexer(),
+            "", "",
+            ProducerType::_PRODUCER_TYPE_COUNT_  // producer_offset = 4
+        );
+        EXPECT_EQ(&client1->streamBufferMultiplexer(), &client2->streamBufferMultiplexer());
+    }
+
+    // processData() must skip records whose producer_id is beyond the range that
+    // UserThreadWebsocketCallbacks registered via addClient() without an OOB access.
+    // Regression test for the missing bounds check on producer_types_[record.producer_id].
+    TEST(UserThreadWebsocketCallbacksUnitTests, ProcessDataSkipsRecordWithOutOfRangeProducerId) {
+        ConcreteUserThreadCallbacks callbacks;
+        // Empty URLs: addClient() is called (producer_types_.size() == 4) but no
+        // producers are registered in the mux (URL-conditional branches are skipped).
+        auto client = std::make_unique<WebSocketClient>(&callbacks, "", "");
+
+        auto &mux = client->streamBufferMultiplexer();
+        // Manually register a producer whose ID is well beyond producer_types_.size().
+        auto pb = mux.add_producer(99u, 4096, 256);
+
+        const char payload[] = "oob-test";
+        auto [ptr, n] = pb->prepare(sizeof(payload));
+        memcpy(ptr, payload, sizeof(payload));
+        pb->commit(sizeof(payload));
+        pb->consume(sizeof(payload));
+
+        // Without the bounds check this would be an OOB vector access; must not crash.
+        EXPECT_NO_THROW(callbacks.processData(100));
+    }
+
+    // processData() must skip records whose slot in producer_types_ holds the
+    // _PRODUCER_TYPE_COUNT_ sentinel (slot in range but type not yet mapped).
+    // Regression test for the missing default/sentinel case in the switch statement.
+    TEST(UserThreadWebsocketCallbacksUnitTests, ProcessDataSkipsSentinelProducerType) {
+        ConcreteUserThreadCallbacks callbacks;
+        // Empty URLs: producer_types_[0..3] are all _PRODUCER_TYPE_COUNT_ because
+        // mapProducerType() is only called from the URL-conditional branches in init().
+        auto client = std::make_unique<WebSocketClient>(&callbacks, "", "");
+
+        auto &mux = client->streamBufferMultiplexer();
+        // Register producer 0 in the mux directly; its slot exists in producer_types_
+        // but holds the sentinel value (not mapped to any real type).
+        auto pb = mux.add_producer(0u, 4096, 256);
+
+        const char payload[] = "sentinel-test";
+        auto [ptr, n] = pb->prepare(sizeof(payload));
+        memcpy(ptr, payload, sizeof(payload));
+        pb->commit(sizeof(payload));
+        pb->consume(sizeof(payload));
+
+        // Without the sentinel case the switch has undefined behavior; must not crash.
+        EXPECT_NO_THROW(callbacks.processData(100));
     }
 
     TEST_F(WebSocketTests, RepeatedConnectDisconnect) {

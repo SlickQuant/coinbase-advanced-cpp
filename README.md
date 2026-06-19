@@ -15,6 +15,8 @@ A modern C++ SDK for interacting with the Coinbase Advanced API, providing both 
   - Connection lifecycle callbacks for connect/disconnect events
   - Per-client sequence number tracking for multiple concurrent connections
   - Explicit shutdown control with `stop()` method
+- **Shared Multiplexer**: Multiple `WebSocketClient` instances share one `slick::stream_buffer_multiplexer` — unified lock-free ring-buffer allocation and a single fan-in queue across all symbols
+- **Cross-process IPC**: Producer buffers and the fan-in queue can be placed in named shared memory; a second process can attach and read the same raw JSON stream without an extra network connection
 - **Comprehensive Order Types**: Support for market, limit, stop limit, bracket, and TWAP orders
 - **Type Safety**: Full C++ type definitions for all API responses with JSON serialization/deserialization
 - **Modern C++**: Uses C++20 features, RAII, smart pointers, and modern C++ best practices
@@ -271,6 +273,48 @@ client.stop();
 - **`WebsocketCallbacks`**: Immediate processing on WebSocket I/O thread. Simple but can block WebSocket operations if callbacks are slow.
 - **`UserThreadWebsocketCallbacks`**: Deferred processing on your thread. Better performance and control, but requires calling `processData()` regularly. Uses lock-free queues for efficient data transfer between threads.
 
+##### Multiple symbols with a shared multiplexer
+
+Multiple `WebSocketClient` instances can share one `slick::stream_buffer_multiplexer`. Each client is assigned a non-overlapping range of producer IDs via `producer_offset`. A single `processData()` drains messages from all symbols in arrival order.
+
+```cpp
+slick::stream_buffer_multiplexer mux(1u << 17);
+
+// BTC uses producer IDs 0–3, ETH uses 4–7
+coinbase::WebSocketClient ws_btc(&callbacks, mux, MD_URL, "", 0);
+coinbase::WebSocketClient ws_eth(&callbacks, mux, MD_URL, "",
+                                  coinbase::ProducerType::_PRODUCER_TYPE_COUNT_);
+
+while (running) {
+    callbacks.processData(200);  // drains both symbols
+}
+```
+
+##### Cross-process market data logging
+
+Passing `md_read_buffer_shm_name` to the `WebSocketClient` constructor places the MD_DATA producer buffer in named shared memory. Combining this with a shared-memory fan-in queue lets a second process attach and read the same raw JSON stream — no extra network connection required.
+
+```cpp
+// Process A — producer
+slick::stream_buffer_multiplexer mux(1u << 17, "my_mux_queue");
+coinbase::WebSocketClient ws(&callbacks, mux, MD_URL, "", 0,
+    1u << 26, 1u << 16, "my_btc_md_buf");
+
+// Process B — reader (no WebSocket, no coinbase parsing)
+slick::stream_buffer_multiplexer reader_mux("my_mux_queue");
+reader_mux.add_producer(0 /*MD_DATA producer_id*/, "my_btc_md_buf");
+
+uint64_t cursor = reader_mux.initial_reading_index();
+while (running) {
+    if (auto rec = reader_mux.read(cursor)) {
+        // rec.data points to raw JSON bytes; rec.length is the frame size
+        std::cout.write(reinterpret_cast<const char*>(rec.data), rec.length);
+    }
+}
+```
+
+See `examples/multi_websockets_ws_callbacks.cpp` (producer) and `examples/multi_websockets_ws_callbacks_reader.cpp` (cross-process reader) for a complete two-symbol demo.
+
 ## API Endpoints
 
 ### REST API
@@ -313,6 +357,20 @@ The SDK supports multiple order types:
 ## Authentication
 
 The SDK handles JWT authentication automatically using the `coinbase::generate_coinbase_jwt` function. You need to provide your API key and secret.
+
+## Examples
+
+The `examples/` directory contains five self-contained programs. Build them with `-DBUILD_COINBASE_ADVANCED_EXAMPLES=ON`:
+
+| Executable | Description |
+|---|---|
+| `market_data_ws_callbacks` | Single-client market data with `WebsocketCallbacks` (I/O thread) |
+| `market_data_user_thread_callbacks` | Single-client market data with `UserThreadWebsocketCallbacks`; also queries REST endpoints |
+| `multi_websockets_ws_callbacks` | BTC-USD + ETH-USD, one `WebSocketClient` each, shared mux; callbacks on I/O thread; mux and MD buffers in **named shared memory** |
+| `multi_websockets_user_thread_callbacks` | BTC-USD + ETH-USD, shared mux, single `processData()` loop; per-symbol order books printed every 5 s |
+| `multi_websockets_ws_callbacks_reader` | Cross-process reader — attaches to the shared memory written by `multi_websockets_ws_callbacks` and logs raw JSON; start the producer first |
+
+All examples require no API credentials for public market-data channels (TICKER, LEVEL2, MARKET_TRADES).
 
 ## Testing
 

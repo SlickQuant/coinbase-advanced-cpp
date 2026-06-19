@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-06-19
+
+### Added
+- Five runnable examples (`examples/`): `market_data_ws_callbacks` and `market_data_user_thread_callbacks` for one or more symbols; `multi_websockets_ws_callbacks` and `multi_websockets_user_thread_callbacks` demonstrating two symbols (BTC-USD + ETH-USD, one symbol per WebSocket) sharing a `stream_buffer_multiplexer` via `producer_offset`; `multi_websockets_ws_callbacks_reader` demonstrating cross-process IPC by attaching to the named shared-memory mux and producer buffers written by `multi_websockets_ws_callbacks` — raw JSON is logged on a second process with no extra network connection
+- `BUILD_COINBASE_ADVANCED_EXAMPLES` CMake option to build examples
+- Second `WebSocketClient` constructor accepting an external `slick::stream_buffer_multiplexer`, enabling multiple clients to share one multiplexer
+- `producer_offset` parameter on both `WebSocketClient` constructors to assign non-overlapping producer ID ranges per client
+- Buffer-sizing parameters on `WebSocketClient` constructors: `md_read_buffer_size`, `md_record_size`, `user_read_buffer_size`, `user_record_size`, `write_buffer_size` (all with sensible defaults)
+- Shared-memory name parameters (`md_read_buffer_shm_name`, `user_read_buffer_shm_name`) for zero-copy IPC via named shared memory
+- `WebSocketClient::marketDataUrl()`, `userDataUrl()`, and `streamBufferMultiplexer()` accessors
+- `ProducerType` enum (`MD_DATA`, `USER_DATA`, `MD_CTRL`, `USER_CTRL`) for typed producer-buffer routing
+
+### Changed
+- **BREAKING:** Upgraded `slick-net` from v2.1.0 to v3.0.0; `slick-stream-buffer-multiplexer` and `slick-dynamic-buffer` are bundled in slick-net v3.0.0
+- **BREAKING:** `UserThreadWebsocketCallbacks` constructor no longer accepts a `queue_size` parameter; buffer sizing is now controlled via `WebSocketClient` constructor arguments
+- **BREAKING:** `WebSocketClient::logData()` no longer accepts a `data_queue_size` parameter
+- **BREAKING:** `WebSocketChannel::__COUNT__` renamed to `_CHANNEL_COUNT_`
+- `UserThreadWebsocketCallbacks` now uses `slick::stream_buffer_multiplexer` instead of `SlickQueue<char>` for inter-thread data delivery — zero-copy, lock-free, and multiplexed across multiple clients
+- `WebSocketClient` WebSocket objects are now created at construction time (not lazily on first `subscribe()`)
+- `dispatchData()` now routes to dedicated per-`ProducerType` producer buffers; raw market/user data is written directly by slick-net's websocket layer, eliminating an extra copy
+- Data logger reads from the shared multiplexer using producer IDs rather than a separate queue
+- `WebSocketClient` is now explicitly non-copyable and non-movable
+- `reset_callbacks()` replaced with `detach()` in destructor (slick-net v3.0.0 API change)
+- `MessageType::MARKET_DATA` and `MessageType::USER_DATA` removed; data routing is now handled by producer type rather than a message type header
+
 ## [0.3.0] - 2026-06-08
 
 ### Added

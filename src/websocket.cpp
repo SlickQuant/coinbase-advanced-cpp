@@ -26,7 +26,7 @@ std::string to_string(WebSocketChannel channel) {
         return "ticker_batch";
     case WebSocketChannel::FUTURES_BALANCE_SUMMARY:
         return "futures_balance_summary";
-    case WebSocketChannel::__COUNT__:
+    case WebSocketChannel::_CHANNEL_COUNT_:
         break;
     }
     return "UNKNOWN_CHANNEL";
@@ -73,66 +73,104 @@ void UserThreadWebsocketCallbacks::resetUserDataSequence(WebSocketClient *ws_cli
     user_seq_nums_.erase(ws_client);
 }
 
+void UserThreadWebsocketCallbacks::addClient(slick::stream_buffer_multiplexer &mux, uint32_t producer_offset) {
+    assert(!mux_ || mux_ == &mux);
+    mux_ = &mux;
+    auto sz = producer_offset + ProducerType::_PRODUCER_TYPE_COUNT_;
+    if (clients_.size() < sz) {
+        clients_.resize(sz, nullptr);
+    }
+    if (producer_types_.size() < sz) {
+        producer_types_.resize(sz, ProducerType::_PRODUCER_TYPE_COUNT_);
+    }
+}
+
+void UserThreadWebsocketCallbacks::mapProducerType(uint32_t producer_id, ProducerType pt) {
+    assert(producer_id < producer_types_.size());
+    producer_types_[producer_id] = pt;
+}
+
 void UserThreadWebsocketCallbacks::processData(uint32_t max_drain_count) {
+    if (!mux_) return;
+
     uint32_t i = 0;
     do {
-        auto [data_ptr, data_size] = data_queue_.read(read_cursor_);
-        if (!data_ptr || data_size == 0) {
+        auto record = mux_->read(read_cursor_);
+        if (!record) {
+            // no data available
             break;
         }
-        WebSocketClient* client = nullptr;
-        memcpy(&client, data_ptr, sizeof(WebSocketClient*));
-        MessageType type {data_ptr[sizeof(WebSocketClient*)]};
-        data_ptr += MESSAGE_HEADER_SIZE;
-        switch (type) {
-            case MessageType::MARKET_CONNECTED:
-                md_clients_.emplace(client);
-                callbacks_->onMarketDataConnected(client);
-                break;
-            case MessageType::MARKET_DISCONNECTED:
-                callbacks_->onMarketDataDisconnected(client);
-                resetMarketDataSequence(client);
-                md_clients_.erase(client);
-                break;
-            case MessageType::MARKET_DATA:
-                if (md_clients_.contains(client)) {
-                    processMarketData(client, data_ptr, data_size - MESSAGE_HEADER_SIZE);
+        if (record.producer_id >= producer_types_.size()) {     // unknown producer_id
+            continue;
+        }
+
+        auto prod_type = producer_types_[record.producer_id];
+        switch (prod_type) {
+            case ProducerType::MD_CTRL:
+            case ProducerType::USER_CTRL: {
+                const char* data_ptr = reinterpret_cast<const char*>(record.data);
+                WebSocketClient* client = nullptr;
+                memcpy(&client, record.data, sizeof(WebSocketClient*));
+                MessageType type { static_cast<const char>(record.data[sizeof(WebSocketClient*)]) };
+                data_ptr += MESSAGE_HEADER_SIZE;
+                switch (type) {
+                    case MessageType::MARKET_CONNECTED:
+                        clients_[record.producer_id] = client;
+                        clients_[record.producer_id - 2] = client;  // set client to MD_DATA's producer_id
+                        callbacks_->onMarketDataConnected(client);
+                        break;
+                    case MessageType::MARKET_DISCONNECTED:
+                        callbacks_->onMarketDataDisconnected(client);
+                        resetMarketDataSequence(client);
+                        clients_[record.producer_id] = nullptr;
+                        clients_[record.producer_id - 2] = nullptr;
+                        break;
+                    case MessageType::USER_CONNECTED:
+                        clients_[record.producer_id] = client;
+                        clients_[record.producer_id - 2] = client;  // set client to USER_DATA's producer_id
+                        callbacks_->onUserDataConnected(client);
+                        break;
+                    case MessageType::USER_DISCONNECTED:
+                        callbacks_->onUserDataDisconnected(client);
+                        resetUserDataSequence(client);
+                        clients_[record.producer_id] = nullptr;
+                        clients_[record.producer_id - 2] = nullptr;
+                        break;
+                    case MessageType::MARKET_ERROR:
+                        if (clients_[record.producer_id]) {
+                            callbacks_->onMarketDataError(client, std::string(data_ptr, record.length - MESSAGE_HEADER_SIZE));
+                        }
+                        break;
+                    case MessageType::USER_ERROR:
+                        if (clients_[record.producer_id]) {
+                            callbacks_->onUserDataError(client, std::string(data_ptr, record.length - MESSAGE_HEADER_SIZE));
+                        }
+                        break;
+                    case MessageType::MARKET_DATA_GAP:
+                        if (clients_[record.producer_id]) {
+                            callbacks_->onMarketDataGap(client);
+                        }
+                        break;
+                    case MessageType::USER_DATA_GAP:
+                        if (clients_[record.producer_id]) {
+                            callbacks_->onUserDataGap(client);
+                        }
+                        break;
                 }
                 break;
-            case MessageType::USER_CONNECTED:
-                user_clients_.emplace(client);
-                callbacks_->onUserDataConnected(client);
-                break;
-            case MessageType::USER_DISCONNECTED:
-                callbacks_->onUserDataDisconnected(client);
-                resetUserDataSequence(client);
-                user_clients_.erase(client);
-                break;
-            case MessageType::USER_DATA:
-                if (user_clients_.contains(client)) {
-                    processUserData(client, data_ptr, data_size - MESSAGE_HEADER_SIZE);
+            }
+            case ProducerType::MD_DATA:
+                if (clients_[record.producer_id]) {
+                    processMarketData(clients_[record.producer_id], reinterpret_cast<const char*>(record.data), record.length);
                 }
                 break;
-            case MessageType::MARKET_ERROR:
-                if (md_clients_.contains(client)) {
-                    callbacks_->onMarketDataError(client, std::string(data_ptr, data_size - MESSAGE_HEADER_SIZE));
+            case ProducerType::USER_DATA:
+                if (clients_[record.producer_id]) {
+                    processUserData(clients_[record.producer_id], reinterpret_cast<const char*>(record.data), record.length);
                 }
                 break;
-            case MessageType::USER_ERROR:
-                if (user_clients_.contains(client)) {
-                    callbacks_->onUserDataError(client, std::string(data_ptr, data_size - MESSAGE_HEADER_SIZE));
-                }
-                break;
-            case MessageType::MARKET_DATA_GAP:
-                if (md_clients_.contains(client)) {
-                    callbacks_->onMarketDataGap(client);
-                }
-                break;
-            case MessageType::USER_DATA_GAP:
-                if (user_clients_.contains(client)) {
-                    callbacks_->onUserDataGap(client);
-                }
-                break;
+            case ProducerType::_PRODUCER_TYPE_COUNT_:
+                continue;
         }
     }
     while(++i < max_drain_count);
@@ -142,32 +180,78 @@ void UserThreadWebsocketCallbacks::processData(uint32_t max_drain_count) {
 WebSocketClient::WebSocketClient(
     WebsocketCallbacks *callbacks,
     std::string_view market_data_url,
-    std::string_view user_data_url)
+    std::string_view user_data_url,
+    uint32_t producer_offset,
+    uint32_t md_read_buffer_size,
+    uint32_t md_record_size,
+    const char* md_read_buffer_shm_name,
+    uint32_t user_read_buffer_size,
+    uint32_t user_record_size,
+    const char* user_read_buffer_shm_name,
+    uint32_t write_buffer_size
+)
     : market_data_url_(market_data_url)
     , user_data_url_(user_data_url)
+    , owning_mux_(new slick::stream_buffer_multiplexer(std::max(md_record_size, user_record_size) * 2))
+    , mux_(*owning_mux_.get())
+    , producer_offset_(producer_offset)
     , user_thread_callbacks_(dynamic_cast<UserThreadWebsocketCallbacks*>(callbacks))
 {
-    if (user_thread_callbacks_) {
-        data_queue_ = &user_thread_callbacks_->data_queue_;
-        data_handler_ = user_thread_callbacks_;
-    }
-    else {
-        data_handler_ = new DataHandler();
-        data_handler_->callbacks_ = callbacks;
-    }
+    init(
+        callbacks,
+        md_read_buffer_size,
+        md_record_size,
+        md_read_buffer_shm_name,
+        user_read_buffer_size,
+        user_record_size,
+        user_read_buffer_shm_name,
+        write_buffer_size
+    );
+}
+
+WebSocketClient::WebSocketClient(
+    WebsocketCallbacks *callbacks,
+    slick::stream_buffer_multiplexer &mux,
+    std::string_view market_data_url,
+    std::string_view user_data_url,
+    uint32_t producer_offset,
+    uint32_t md_read_buffer_size,
+    uint32_t md_record_size,
+    const char* md_read_buffer_shm_name,
+    uint32_t user_read_buffer_size,
+    uint32_t user_record_size,
+    const char* user_read_buffer_shm_name,
+    uint32_t write_buffer_size
+)
+    : market_data_url_(market_data_url)
+    , user_data_url_(user_data_url)
+    , mux_(mux)
+    , producer_offset_(producer_offset)
+    , user_thread_callbacks_(dynamic_cast<UserThreadWebsocketCallbacks*>(callbacks))
+{
+    init(
+        callbacks,
+        md_read_buffer_size,
+        md_record_size,
+        md_read_buffer_shm_name,
+        user_read_buffer_size,
+        user_record_size,
+        user_read_buffer_shm_name,
+        write_buffer_size
+    );
 }
 
 WebSocketClient::~WebSocketClient() {
     if (market_data_websocket_) {
         if (market_data_websocket_->status() != Websocket::Status::DISCONNECTED) {
-            market_data_websocket_->reset_callbacks();
+            market_data_websocket_->detach();
             market_data_websocket_->close();
         }
         market_data_websocket_.reset();
     }
     if (user_data_websocket_) {
         if (user_data_websocket_->status() != Websocket::Status::DISCONNECTED) {
-            user_data_websocket_->reset_callbacks();
+            user_data_websocket_->detach();
             user_data_websocket_->close();
         }
         user_data_websocket_.reset();
@@ -178,11 +262,6 @@ WebSocketClient::~WebSocketClient() {
         logger_thread_.join();
     }
 
-    if (data_queue_ && !user_thread_callbacks_) {
-        delete data_queue_;
-        data_queue_ = nullptr;
-    }
-
     if (!user_thread_callbacks_) {
         delete data_handler_;
     }
@@ -190,6 +269,79 @@ WebSocketClient::~WebSocketClient() {
         user_thread_callbacks_ = nullptr;
     }
     data_handler_ = nullptr;
+}
+
+void WebSocketClient::init(
+    WebsocketCallbacks *callbacks,
+    uint32_t md_read_buffer_size,
+    uint32_t md_record_size,
+    const char* md_read_buffer_shm_name,
+    uint32_t user_read_buffer_size,
+    uint32_t user_record_size,
+    const char* user_read_buffer_shm_name,
+    uint32_t write_buffer_size
+) {
+    assert(producer_offset_ + ProducerType::_PRODUCER_TYPE_COUNT_ < std::numeric_limits<uint32_t>::max());
+    producer_buffers_.resize(producer_offset_ + ProducerType::_PRODUCER_TYPE_COUNT_, nullptr);
+
+    if (user_thread_callbacks_) {
+        user_thread_callbacks_->addClient(mux_, producer_offset_);
+        data_handler_ = user_thread_callbacks_;
+    }
+    else {
+        data_handler_ = new DataHandler();
+        data_handler_->callbacks_ = callbacks;
+    }
+
+    if (!user_data_url_.empty()) {
+        uint32_t pid = producer_offset_ + ProducerType::USER_CTRL;
+        auto user_ctrl_pb = mux_.add_producer(pid, 4096, 256);
+        producer_buffers_[pid] = user_ctrl_pb.get();
+        if (user_thread_callbacks_) {
+            user_thread_callbacks_->mapProducerType(pid, ProducerType::USER_CTRL);
+        }
+        pid = producer_offset_ + ProducerType::USER_DATA;
+        user_data_producer_id_ = pid;
+        auto user_data_pb = mux_.add_producer(pid, user_read_buffer_size, user_record_size, user_read_buffer_shm_name);
+        producer_buffers_[pid] = user_data_pb.get();
+        if (user_thread_callbacks_) {
+            user_thread_callbacks_->mapProducerType(pid, ProducerType::USER_DATA);
+        }
+        user_data_websocket_ = std::make_unique<Websocket>(
+            user_data_url_,
+            [this]() { onUserDataConnected(); },
+            [this]() { onUserDataDisconnected(); },
+            [this](const char* data, std::size_t size) { onUserData(data, size); },
+            [this](std::string err) { onUserDataError(std::move(err)); },
+            user_data_pb,
+            write_buffer_size
+        );
+    }
+
+    if (!market_data_url_.empty()) {
+        uint32_t pid = producer_offset_ + ProducerType::MD_CTRL;
+        auto md_ctrl_pb = mux_.add_producer(pid, 4096, 256);
+        producer_buffers_[pid] = md_ctrl_pb.get();
+        if (user_thread_callbacks_) {
+            user_thread_callbacks_->mapProducerType(pid, ProducerType::MD_CTRL);
+        }
+        pid = producer_offset_ + ProducerType::MD_DATA;
+        md_data_producer_id_ = pid;
+        auto md_data_pb = mux_.add_producer(pid, md_read_buffer_size, md_record_size, md_read_buffer_shm_name);
+        producer_buffers_[pid] = md_data_pb.get();
+        if (user_thread_callbacks_) {
+            user_thread_callbacks_->mapProducerType(pid, ProducerType::MD_DATA);
+        }
+        market_data_websocket_ = std::make_unique<Websocket>(
+            market_data_url_,
+            [this]() { onMarketDataConnected(); },
+            [this]() { onMarketDataDisconnected(); },
+            [this](const char* data, std::size_t size) { onMarketData(data, size); },
+            [this](std::string err) { onMarketDataError(std::move(err)); },
+            md_data_pb,
+            write_buffer_size
+        );
+    }
 }
 
 void WebSocketClient::stop() {
@@ -209,57 +361,33 @@ void WebSocketClient::subscribe(const std::vector<std::string> &product_ids, con
     for (auto channel : channels) {
         auto products = product_ids_[static_cast<uint8_t>(channel)];
         auto subscribe_json = json{{"type", "subscribe"}, {"product_ids", product_ids}, {"channel", to_string(channel)}};
-        Websocket* websocket;
+        Websocket* websocket = nullptr;
         if (channel == WebSocketChannel::USER) {
-            if (!user_data_websocket_) {
-                if (!user_data_url_.empty()) {
-                    user_data_websocket_ = std::make_unique<Websocket>(
-                        user_data_url_,
-                        [this]() { onUserDataConnected(); },
-                        [this]() { onUserDataDisconnected(); },
-                        [this](const char* data, std::size_t size) { onUserData(data, size); },
-                        [this](std::string err) { onUserDataError(std::move(err)); }
-                    );
+            if (user_data_websocket_) {
+                if (user_data_websocket_->status() > Websocket::Status::CONNECTED) {
                     user_data_websocket_->open();
-    
+                    
                     // subscribe heartbeat to keep user channel alive
                     auto heartbeat_sub = json{{"type", "subscribe"}, {"channel", "heartbeats"}};
                     heartbeat_sub["jwt"] = generate_coinbase_jwt(user_data_url_.c_str());
                     auto subscribe_str = heartbeat_sub.dump();
                     user_data_websocket_->send(subscribe_str.c_str(), subscribe_str.size());
                 }
-            } else if (user_data_websocket_->status() > Websocket::Status::CONNECTED) {
-                user_data_websocket_->open();
-
-                // subscribe heartbeat to keep user channel alive
-                auto heartbeat_sub = json{{"type", "subscribe"}, {"channel", "heartbeats"}};
-                heartbeat_sub["jwt"] = generate_coinbase_jwt(user_data_url_.c_str());
-                auto subscribe_str = heartbeat_sub.dump();
-                user_data_websocket_->send(subscribe_str.c_str(), subscribe_str.size());
+                websocket = user_data_websocket_.get();
+                subscribe_json["jwt"] = generate_coinbase_jwt(user_data_url_.c_str());
             }
-            websocket = user_data_websocket_.get();
-            subscribe_json["jwt"] = generate_coinbase_jwt(user_data_url_.c_str());
         }
         else {
-            if (!market_data_websocket_) {
-                if (!market_data_url_.empty()) {
-                    market_data_websocket_ = std::make_unique<Websocket>(
-                        market_data_url_,
-                        [this]() { onMarketDataConnected(); },
-                        [this]() { onMarketDataDisconnected(); },
-                        [this](const char* data, std::size_t size) { onMarketData(data, size); },
-                        [this](std::string err) { onMarketDataError(std::move(err)); }
-                    );
+            if (market_data_websocket_) {
+                if (market_data_websocket_->status() > Websocket::Status::CONNECTED) {
                     market_data_websocket_->open();
                 }
-            } else if (market_data_websocket_->status() > Websocket::Status::CONNECTED) {
-                market_data_websocket_->open();
+                websocket = market_data_websocket_.get();
             }
-            websocket = market_data_websocket_.get();
         }
 
         if (websocket == nullptr) {
-            LOG_WARN("WebSocket for channel {} is not initialized.", to_string(channel));
+            LOG_WARN("WebSocket for channel {} is not initialized, URL is empty.", to_string(channel));
             continue;
         }
 
@@ -288,15 +416,9 @@ void WebSocketClient::unsubscribe(const std::vector<std::string> &product_ids, c
     }
 }
 
-void WebSocketClient::logData(std::string_view data_file, uint32_t data_queue_size) {
+void WebSocketClient::logData(std::string_view data_file) {
     data_log_.open(std::string(data_file), std::ios::out | std::ios::app);
     if (data_log_.is_open()) {
-        if (user_thread_callbacks_) {
-            data_queue_ = &user_thread_callbacks_->data_queue_;
-        }
-        else {
-            data_queue_ = new slick::SlickQueue<char>(data_queue_size);
-        }
         logger_run_.store(true, std::memory_order_release);
         logger_thread_ = std::thread([this](){
             runDataLogger();
@@ -307,47 +429,47 @@ void WebSocketClient::logData(std::string_view data_file, uint32_t data_queue_si
     }
 }
 
-void WebSocketClient::dispatchData(const char* data, std::size_t size, MessageType type) {
-    assert(data_queue_);
-    auto sz = (uint32_t)(MESSAGE_HEADER_SIZE + size);
-    auto index = data_queue_->reserve(sz);
-    auto dest = (*data_queue_)[index];
-    void *self = this;
-    memcpy(dest, &self, sizeof(WebSocketClient*));
-    dest[sizeof(WebSocketClient*)] = static_cast<char>(type);
-    memcpy(dest + MESSAGE_HEADER_SIZE, data, size);
-    data_queue_->publish(index, sz);
+void WebSocketClient::dispatchData(ProducerType pt, const char* data, std::size_t size, MessageType type) {
+    assert(pt > ProducerType::USER_DATA && (producer_offset_ + pt) < producer_buffers_.size());
+    auto *pb = producer_buffers_[producer_offset_ + pt];
+    if (pb) [[likely]] {
+        auto sz = (uint32_t)(MESSAGE_HEADER_SIZE + size);
+        void *self = this;
+        auto [ptr, n] = pb->prepare(sz);
+        memcpy(ptr, &self, sizeof(WebSocketClient*));
+        ptr[sizeof(WebSocketClient*)] = static_cast<char>(type);
+        memcpy(ptr + MESSAGE_HEADER_SIZE, data, size);
+        pb->commit(sz);
+        pb->consume(sz);
+    }
 }
 
 void WebSocketClient::runDataLogger() {
-    if (!data_queue_ || !data_log_.is_open()) {
+    if (!data_log_.is_open()) {
         return;
     }
 
     while (logger_run_.load(std::memory_order_relaxed)) {
-        auto [data, size] = data_queue_->read(data_cursor_);
-        if (!data) {
+        auto record = mux_.read(log_cursor_);
+        if (!record) {
             std::this_thread::yield();
             continue;
         }
-        MessageType type {data[sizeof(WebSocketClient*)]};
-        if (type == MessageType::MARKET_DATA || type == MessageType::USER_DATA) {
-            data += MESSAGE_HEADER_SIZE;     // skip client and type identifier
-            data_log_.write(data, size - MESSAGE_HEADER_SIZE);
+
+        if (record.producer_id == md_data_producer_id_ || record.producer_id == user_data_producer_id_) {
+            data_log_.write(reinterpret_cast<const char*>(record.data), record.length);
             data_log_ << std::endl;
         }
     }
 
     // drain data queue
     while (true) {
-        auto [data, size] = data_queue_->read(data_cursor_);
-        if (!data) {
+        auto record = mux_.read(log_cursor_);
+        if (!record) {
             break;
         }
-        MessageType type {data[sizeof(WebSocketClient*)]};
-        if (type == MessageType::MARKET_DATA || type == MessageType::USER_DATA) {
-            data += MESSAGE_HEADER_SIZE;     // skip client and channel identifier
-            data_log_.write(data, size - MESSAGE_HEADER_SIZE);
+        if (record.producer_id == md_data_producer_id_ || record.producer_id == user_data_producer_id_) {
+            data_log_.write(reinterpret_cast<const char*>(record.data), record.length);
             data_log_ << std::endl;
         }
     }
@@ -355,7 +477,7 @@ void WebSocketClient::runDataLogger() {
 
 void WebSocketClient::onMarketDataConnected() {
     if (user_thread_callbacks_) {
-        dispatchData(&empty_msg, 1, MessageType::MARKET_CONNECTED);
+        dispatchData(ProducerType::MD_CTRL, &empty_msg, 1, MessageType::MARKET_CONNECTED);
     }
     else {
         data_handler_->callbacks_->onMarketDataConnected(this);
@@ -364,7 +486,7 @@ void WebSocketClient::onMarketDataConnected() {
 
 void WebSocketClient::onMarketDataDisconnected() {
     if (user_thread_callbacks_) {
-        dispatchData(&empty_msg, 1, MessageType::MARKET_DISCONNECTED);
+        dispatchData(ProducerType::MD_CTRL, &empty_msg, 1, MessageType::MARKET_DISCONNECTED);
     }
     else {
         data_handler_->callbacks_->onMarketDataDisconnected(this);
@@ -375,7 +497,7 @@ void WebSocketClient::onMarketDataDisconnected() {
 
 void WebSocketClient::onUserDataConnected() {
     if (user_thread_callbacks_) {
-        dispatchData(&empty_msg, 1, MessageType::USER_CONNECTED);
+        dispatchData(ProducerType::USER_CTRL, &empty_msg, 1, MessageType::USER_CONNECTED);
     }
     else {
         data_handler_->callbacks_->onUserDataConnected(this);
@@ -384,7 +506,7 @@ void WebSocketClient::onUserDataConnected() {
 
 void WebSocketClient::onUserDataDisconnected() {
     if (user_thread_callbacks_) {
-        dispatchData(&empty_msg, 1, MessageType::USER_DISCONNECTED);
+        dispatchData(ProducerType::USER_CTRL, &empty_msg, 1, MessageType::USER_DISCONNECTED);
     }
     else {
         data_handler_->callbacks_->onUserDataDisconnected(this);
@@ -393,36 +515,20 @@ void WebSocketClient::onUserDataDisconnected() {
 }
 
 void WebSocketClient::onMarketData(const char* data, std::size_t size) {
-    if (user_thread_callbacks_) {
-        dispatchData(data, size, MessageType::MARKET_DATA);
-    }
-    else {
+    if (!user_thread_callbacks_) {
         data_handler_->processMarketData(this, data, size);
-        // If data_queue_ is not nullptr, data logger is enabled.
-        // dispatch data for logging
-        if (data_queue_) {
-            dispatchData(data, size, MessageType::MARKET_DATA);
-        }
     }
 }
 
 void WebSocketClient::onUserData(const char* data, std::size_t size) {
-    if (user_thread_callbacks_) {
-        dispatchData(data, size, MessageType::USER_DATA);
-    }
-    else {
+    if (!user_thread_callbacks_) {
         data_handler_->processUserData(this, data, size);
-        // If data_queue_ is not nullptr, data logger is enabled.
-        // dispatch data for logging
-        if (data_queue_) {
-            dispatchData(data, size, MessageType::USER_DATA);
-        }
     }
 }
 
 void WebSocketClient::onMarketDataError(std::string &&err) {
     if (user_thread_callbacks_) {
-        dispatchData(err.c_str(), err.size(), MessageType::MARKET_ERROR);
+        dispatchData(ProducerType::MD_CTRL, err.c_str(), err.size(), MessageType::MARKET_ERROR);
     }
     else {
         data_handler_->callbacks_->onMarketDataError(this, std::move(err));
@@ -431,7 +537,7 @@ void WebSocketClient::onMarketDataError(std::string &&err) {
 
 void WebSocketClient::onUserDataError(std::string &&err) {
     if (user_thread_callbacks_) {
-        dispatchData(err.c_str(), err.size(), MessageType::USER_ERROR);
+        dispatchData(ProducerType::USER_CTRL, err.c_str(), err.size(), MessageType::USER_ERROR);
     }
     else {
         data_handler_->callbacks_->onUserDataError(this, std::move(err));
