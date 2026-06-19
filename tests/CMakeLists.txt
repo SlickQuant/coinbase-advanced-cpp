@@ -36,7 +36,7 @@ include(GoogleTest)
 
 add_executable(coinbase_advance_tests rest_api_tests.cpp websocket_tests.cpp rest_awaitable_tests.cpp timestamp_parsing_tests.cpp)
 target_include_directories(coinbase_advance_tests PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(coinbase_advance_tests PRIVATE coinbase-advanced-cpp slick::net GTest::gtest_main)
+target_link_libraries(coinbase_advance_tests PRIVATE coinbase-advanced-cpp slick::net slick::logger GTest::gtest_main)
 
 # Discover tests with increased timeout
 gtest_discover_tests(coinbase_advance_tests DISCOVERY_TIMEOUT 30)
