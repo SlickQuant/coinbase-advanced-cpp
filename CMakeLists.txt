@@ -1,10 +1,13 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.21)
 
 set(CMAKE_CXX_STANDARD 20)
 
 project(coinbase-advanced-cpp
-    VERSION 0.3.0
+    VERSION 1.0.0
     LANGUAGES CXX)
+
+option(BUILD_COINBASE_ADVANCED_TESTS "Build coinbase advanced tests" ${PROJECT_IS_TOP_LEVEL})
+option(BUILD_COINBASE_ADVANCED_EXAMPLES "Build coinbas advanced examples" ${PROJECT_IS_TOP_LEVEL})
 
 if (CMAKE_BUILD_TYPE MATCHES Debug)
     add_definitions(-DDEBUG)
@@ -18,18 +21,18 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(OpenSSL CONFIG REQUIRED)
 find_package(jwt-cpp CONFIG REQUIRED)
 
-find_package(slick-net 2.1.0 CONFIG QUIET)
+find_package(slick-net 3.0.0 CONFIG QUIET)
 if (NOT slick-net_FOUND)
     message(STATUS "fetching slick-net...")
     include(FetchContent)
     FetchContent_Declare(
         slick-net
         GIT_REPOSITORY https://github.com/SlickQuant/slick-net.git
-        GIT_TAG v2.1.0
+        GIT_TAG v3.0.0
     )
     FetchContent_MakeAvailable(slick-net)
 else()
-    message(STATUS "Found slick-net: ${slick-net_VERSION}")
+    message(STATUS "Found slick-net ${slick-net_VERSION}: ${slick-net_DIR}")
 endif()
 
 add_library(coinbase-advanced-cpp STATIC
@@ -45,7 +48,7 @@ target_include_directories(coinbase-advanced-cpp PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
-target_link_libraries(coinbase-advanced-cpp PUBLIC slick::net jwt-cpp::jwt-cpp)
+target_link_libraries(coinbase-advanced-cpp PUBLIC slick::net slick::stream_buffer_multiplexer jwt-cpp::jwt-cpp)
 
 # PRIVATE precompiled headers for faster static library compilation
 target_precompile_headers(coinbase-advanced-cpp PRIVATE
@@ -80,17 +83,19 @@ else()
     )
 endif()
 
-set(BUILD_COINBASE_ADVANCED_TESTS_DEFAULT ON)
-if (NOT CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
-    set(BUILD_COINBASE_ADVANCED_TESTS_DEFAULT OFF)
-endif()
-option(BUILD_COINBASE_ADVANCED_TESTS "Build tests" ${BUILD_COINBASE_ADVANCED_TESTS_DEFAULT})
 if (BUILD_COINBASE_ADVANCED_TESTS)
     message(STATUS "Building coinbase-advanced-cpp tests")
     enable_testing()
     add_subdirectory(tests)
 else()
     message(STATUS "Skipping coinbase-advanced-cpp tests")
+endif()
+
+if (BUILD_COINBASE_ADVANCED_EXAMPLES)
+    message(STATUS "Building coinbase-advanced-cpp examples")
+    add_subdirectory(examples)
+else()
+    message(STATUS "Skipping coinbase-advanced-cpp examples")
 endif()
 
 # Installation rules

@@ -13,8 +13,6 @@
 #include <slick/logger.hpp>
 #include <coinbase/logging.hpp>
 
-#define ENABLE_SLICK_LOGGER
-
 #include <coinbase/rest_awaitable.hpp>
 
 namespace asio = boost::asio;
