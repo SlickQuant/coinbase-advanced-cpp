@@ -54,7 +54,7 @@ protected:
 
     // Helper to run an async coroutine and wait for result
     template<typename Func>
-    auto run_async(Func&& coro) {
+    typename std::invoke_result_t<Func>::value_type run_async(Func&& coro) {
         using awaitable_type = std::invoke_result_t<Func>;
         using result_type = typename awaitable_type::value_type;
 

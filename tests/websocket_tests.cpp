@@ -45,21 +45,21 @@ namespace coinbase::tests {
             std::remove("coinbase.log");
         }
 
-        void onMarketDataConnected(WebSocketClient *) {
+        void onMarketDataConnected(WebSocketClient *) override {
             ++md_connected_count_;
             LOG_INFO("MarketData Connected");
         }
 
-        void onMarketDataDisconnected(WebSocketClient *) {
+        void onMarketDataDisconnected(WebSocketClient *) override {
             ++md_disconnected_count_;
             LOG_INFO("MarketData Disconnected");
         }
 
-        void onUserDataConnected(WebSocketClient *) {
+        void onUserDataConnected(WebSocketClient *) override {
             LOG_INFO("UserData Connected");
         }
 
-        void onUserDataDisconnected(WebSocketClient *) {
+        void onUserDataDisconnected(WebSocketClient *) override {
             LOG_INFO("UserData Disconnected");
         }
 
