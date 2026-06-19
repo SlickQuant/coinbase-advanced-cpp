@@ -25,6 +25,8 @@ find_package(slick-net 3.0.0 CONFIG QUIET)
 if (NOT slick-net_FOUND)
     message(STATUS "fetching slick-net...")
     include(FetchContent)
+    set(BUILD_SLICK_NET_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(BUILD_SLICK_NET_TESTS OFF CACHE BOOL "" FORCE)
     FetchContent_Declare(
         slick-net
         GIT_REPOSITORY https://github.com/SlickQuant/slick-net.git
@@ -48,7 +50,7 @@ target_include_directories(coinbase-advanced-cpp PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
-target_link_libraries(coinbase-advanced-cpp PUBLIC slick::net slick::stream_buffer_multiplexer jwt-cpp::jwt-cpp)
+target_link_libraries(coinbase-advanced-cpp PUBLIC slick::net jwt-cpp::jwt-cpp)
 
 # PRIVATE precompiled headers for faster static library compilation
 target_precompile_headers(coinbase-advanced-cpp PRIVATE
