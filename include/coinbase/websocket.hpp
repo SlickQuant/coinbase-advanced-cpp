@@ -162,6 +162,7 @@ public:
         WebsocketCallbacks *callbacks,
         std::string_view market_data_url = "wss://advanced-trade-ws.coinbase.com",
         std::string_view user_data_url = "wss://advanced-trade-ws-user.coinbase.com",
+        const char* mux_shm_name = nullptr,
         uint32_t md_read_buffer_size = 1u << 26,            // 64 MB reading buffer
         uint32_t md_record_size = 1u << 16,                 // 64K message records
         const char* md_read_buffer_shm_name = nullptr,      // default not using shared memory
