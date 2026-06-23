@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.21)
 set(CMAKE_CXX_STANDARD 20)
 
 project(coinbase-advanced-cpp
-    VERSION 1.0.0
+    VERSION 1.0.1
     LANGUAGES CXX)
 
 option(BUILD_COINBASE_ADVANCED_TESTS "Build coinbase advanced tests" ${PROJECT_IS_TOP_LEVEL})

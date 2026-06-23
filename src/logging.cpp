@@ -1,6 +1,8 @@
 #include <coinbase/logging.hpp>
 #include <slick/net/logging.hpp>
 
+#include <utility>
+
 namespace coinbase::logging {
 
 void set_log_handler(LogHandler handler) {

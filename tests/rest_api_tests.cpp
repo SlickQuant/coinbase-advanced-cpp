@@ -7,7 +7,7 @@
 #include <nlohmann/json.hpp>
 
 #include <slick/logger.hpp>
-#include <coinbase/logging.hpp>
+#include <slick/net/logging.hpp>
 
 #include <coinbase/rest.hpp>
 
@@ -24,7 +24,7 @@ protected:
         logger.add_console_sink();
         // logger.set_level(slick::logger::LogLevel::L_DEBUG);
         logger.init(1048576, 16777216);
-        coinbase::logging::set_log_handler([&logger](slick::net::LogLevel level, const char* format_text, std::format_args args){
+        slick::net::set_log_handler([&logger](slick::net::LogLevel level, const char* format_text, std::format_args args){
             logger.log(static_cast<slick::logger::LogLevel>(level), format_text, args);
         });
 #endif

@@ -36,7 +36,7 @@ include/coinbase/
 ├── fill.hpp             # Fill data
 ├── futures.hpp          # Futures (CFM) data models
 ├── key_permissions.hpp  # API key permissions (Data API) data models
-├── logging.hpp          # Logging utilities
+├── logging.hpp          # Deprecated logging compatibility wrapper
 ├── market_data.hpp      # Market data structures
 ├── order.hpp            # Order management
 ├── payment_method.hpp   # Payment methods data models
@@ -313,6 +313,108 @@ while (running) {
 ```
 
 See `examples/multi_websockets_ws_callbacks.cpp` (producer) and `examples/multi_websockets_ws_callbacks_reader.cpp` (cross-process reader) for a complete two-symbol demo.
+
+#### Logging
+
+The SDK uses slick-net's logging hooks directly. Include `<slick/net/logging.hpp>`, install a process-wide handler with `slick::net::set_log_handler()`, and then use the `LOG_TRACE`, `LOG_DEBUG`, `LOG_INFO`, `LOG_WARN`, `LOG_ERROR`, and `LOG_FATAL` macros from slick-net.
+
+For source compatibility, `<coinbase/logging.hpp>` remains available as a deprecated forwarding header. New code should include `<slick/net/logging.hpp>` and use `slick::net::*` directly.
+
+`set_log_handler()` takes two callables:
+
+- A `LogHandler`: `void(slick::net::LogLevel level, const char* format_text, std::format_args args)`
+- An optional `LogLevelGetter`: `slick::net::LogLevel()`, which returns the current minimum enabled level
+
+The level getter is checked before the macro evaluates the format arguments. For example, when the getter returns `LogLevel::Info`, `LOG_DEBUG("{}", expensive())` does not call `expensive()`. Return `LogLevel::Off` to disable every log level.
+
+Install the handler before starting REST or WebSocket work, and clear it after shutdown if the objects captured by the handler are about to be destroyed. The handler can run on slick-net worker threads, so captured sinks should be thread-safe or otherwise synchronized.
+
+```cpp
+#include <format>
+#include <iostream>
+
+#include <slick/net/logging.hpp>
+
+namespace {
+
+const char* log_level_name(slick::net::LogLevel level) noexcept {
+    switch (level) {
+        case slick::net::LogLevel::Trace: return "TRACE";
+        case slick::net::LogLevel::Debug: return "DEBUG";
+        case slick::net::LogLevel::Info:  return "INFO";
+        case slick::net::LogLevel::Warn:  return "WARN";
+        case slick::net::LogLevel::Error: return "ERROR";
+        case slick::net::LogLevel::Fatal: return "FATAL";
+        case slick::net::LogLevel::Off:   return "OFF";
+    }
+    return "UNKNOWN";
+}
+
+} // namespace
+
+int main() {
+    slick::net::set_log_handler(
+        [](slick::net::LogLevel level, const char* format_text, std::format_args args) {
+            std::cout << '[' << log_level_name(level) << "] ";
+
+            try {
+                std::cout << std::vformat(format_text, args);
+            } catch (...) {
+                // Keep logging non-throwing even if formatting fails.
+                std::cout << format_text;
+            }
+
+            std::cout << '\n';
+        },
+        [] {
+            return slick::net::LogLevel::Info; // Trace/Debug are skipped.
+        }
+    );
+
+    LOG_INFO("Coinbase SDK initialized for {}", "BTC-USD");
+    LOG_DEBUG("This message and its arguments are skipped at Info level");
+
+    // Create/use Coinbase REST or WebSocket clients here.
+
+    slick::net::clear_log_handler();
+}
+```
+
+If your application already uses `slick-logger`, bridge slick-net into it instead of formatting messages yourself:
+
+```cpp
+#include <slick/logger.hpp>
+#include <slick/net/logging.hpp>
+
+void configure_logging() {
+    auto& logger = slick::logger::Logger::instance();
+    logger.clear_sinks();
+    logger.add_console_sink(true, true);
+    logger.set_level(slick::logger::LogLevel::L_DEBUG);
+    logger.init(1024, 16 * 1024 * 1024);
+
+    slick::net::set_log_handler(
+        [&logger](slick::net::LogLevel level, const char* format_text,
+                  std::format_args args) {
+            logger.log(static_cast<slick::logger::LogLevel>(level),
+                       format_text, args);
+        },
+        [] {
+            return static_cast<slick::net::LogLevel>(logger.get_level());
+        }
+    );
+}
+
+void shutdown_logging() {
+    slick::net::clear_log_handler();
+}
+```
+
+When using the slick-logger bridge, link your application to `slick::logger` in addition to this SDK:
+
+```cmake
+target_link_libraries(my_app PRIVATE coinbase-advanced-cpp slick::logger)
+```
 
 ## API Endpoints
 
