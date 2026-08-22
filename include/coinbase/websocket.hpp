@@ -144,14 +144,24 @@ private:
 
 private:
     friend class WebSocketClient;
-    void addClient(slick::stream_buffer_multiplexer &mux, uint32_t producer_offset);
+    void addClient(WebSocketClient* client, slick::stream_buffer_multiplexer &mux, uint32_t producer_offset);
+    // Drops every reference to `client`. Control and data records that a destroyed
+    // client left behind in the multiplexer are discarded by processData() instead of
+    // reaching a callback with a dangling pointer. Called from ~WebSocketClient(), so
+    // destroy clients on the thread that calls processData() or with processData()
+    // stopped - both mutate the routing tables below.
+    void removeClient(WebSocketClient* client);
     void mapProducerType(uint32_t producer_id, ProducerType pt);
 private:
     slick::stream_buffer_multiplexer *mux_ = nullptr;
     uint64_t read_cursor_ = 0;
+    // Live clients by client id. Control records carry the id rather than the client
+    // pointer: ids are never reused, so a record left behind by a destroyed client can
+    // never be mistaken for one from a new client that happens to reuse its address.
+    std::unordered_map<uint64_t, WebSocketClient*> live_clients_;
     std::unordered_map<WebSocketClient*, std::atomic_int_fast64_t> md_seq_nums_;
     std::unordered_map<WebSocketClient*, std::atomic_int_fast64_t> user_seq_nums_;
-    std::vector<WebSocketClient*> clients_;   // 0: md client, 1: user client
+    std::vector<WebSocketClient*> clients_;   // live client per producer_id
     std::vector<ProducerType> producer_types_;
 };
 
@@ -172,6 +182,13 @@ public:
         uint32_t write_buffer_size = 1u << 20               // 1 MB write buffer
     );
 
+    // Shares an external multiplexer. Each client owns the producer ids in
+    // [producer_offset, producer_offset + _PRODUCER_TYPE_COUNT_). Producers left
+    // registered by a destroyed client are reused as-is, keeping the capacity and record
+    // size they were created with. Throws std::invalid_argument when the range overlaps a
+    // client that is still alive (a caller bug), and std::runtime_error while the previous
+    // owner's websocket session can still be writing to those buffers (transient - poll
+    // isProducerOffsetAvailable() instead of catching it).
     WebSocketClient(
         WebsocketCallbacks *callbacks,
         slick::stream_buffer_multiplexer &mux,
@@ -219,6 +236,18 @@ public:
         return mux_;
     }
 
+    // Non-blocking check that a client can be constructed at `producer_offset` on `mux`:
+    // false while a live client owns those producer ids, and while the websocket session
+    // of a destroyed client can still be writing to their buffers. Poll this instead of
+    // catching the constructor's std::runtime_error when re-creating a client.
+    static bool isProducerOffsetAvailable(slick::stream_buffer_multiplexer& mux, uint32_t producer_offset) noexcept;
+
+    // Process-wide unique id of this client. Never reused, not even by a client
+    // constructed at the same address after this one is destroyed.
+    uint64_t clientId() const noexcept {
+        return client_id_;
+    }
+
 private:
     void init(
         WebsocketCallbacks *callbacks,
@@ -229,6 +258,29 @@ private:
         uint32_t user_record_size,
         const char* user_read_buffer_shm_name,
         uint32_t write_buffer_size
+    );
+    // Second half of init(), split out so a failure after the producer ids are claimed
+    // can release them again.
+    void initProducers(
+        WebsocketCallbacks *callbacks,
+        uint32_t md_read_buffer_size,
+        uint32_t md_record_size,
+        const char* md_read_buffer_shm_name,
+        uint32_t user_read_buffer_size,
+        uint32_t user_record_size,
+        const char* user_read_buffer_shm_name,
+        uint32_t write_buffer_size
+    );
+    // Register a producer in the multiplexer, reusing the existing registration when
+    // producer_id is already taken. slick::stream_buffer_multiplexer has no
+    // remove_producer(), so producers registered by a client outlive it: a new client
+    // created on an external multiplexer with the same producer_offset must reuse them
+    // instead of letting add_producer() throw std::invalid_argument.
+    std::shared_ptr<slick::stream_buffer_multiplexer::producer_buffer> addOrReuseProducer(
+        uint32_t producer_id,
+        uint64_t capacity,
+        uint32_t control_size,
+        const char* shm_name = nullptr
     );
     void onMarketDataConnected();
     void onMarketDataDisconnected();
@@ -243,6 +295,8 @@ private:
 
 private:
     friend struct UserThreadWebsocketCallbacks;
+    static inline std::atomic_uint_fast64_t next_client_id_ = 1;
+    const uint64_t client_id_ = next_client_id_.fetch_add(1, std::memory_order_relaxed);
     DataHandler* data_handler_ = nullptr;
     std::string market_data_url_;
     std::string user_data_url_;
@@ -265,6 +319,7 @@ private:
     static inline constexpr char empty_msg = '\0';
 };
 
-constexpr uint32_t MESSAGE_HEADER_SIZE = sizeof(WebSocketClient*) + sizeof(char);
+// Control-record header: client id followed by the MessageType tag.
+constexpr uint32_t MESSAGE_HEADER_SIZE = sizeof(uint64_t) + sizeof(char);
 
 }  // end namespace coinbase

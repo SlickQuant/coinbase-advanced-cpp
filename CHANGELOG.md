@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `WebSocketClient::isProducerOffsetAvailable(mux, producer_offset)` — non-blocking check that a client can be constructed at a `producer_offset`, so re-creating a client never needs a blocking wait or an exception-driven retry loop
+- `WebSocketClient::clientId()` — a process-wide unique ID that is never reused, carried by every control record so records from a destroyed client cannot be confused with records from a new client allocated at the same address
+
+### Fixed
+- Re-creating a `WebSocketClient` with the same `producer_offset` on an external `slick::stream_buffer_multiplexer` after the previous client was closed and destroyed no longer throws `std::invalid_argument: producer_id N already registered`; the already registered producer buffers are reused instead (a warning is logged when the requested buffer geometry differs from the registered one)
+- Producer IDs are now owned for the lifetime of the client that registers them, so only a destroyed client's producers can be reused; constructing a second client at a `producer_offset` that overlaps a live client throws `std::invalid_argument` instead of interleaving two WebSockets into one producer buffer, and one whose previous session is still closing throws `std::runtime_error`
+- A `WebSocketClient` destroyed while `UserThreadWebsocketCallbacks` still had its records queued no longer dispatches them to callbacks with a dangling `WebSocketClient*`; `~WebSocketClient()` now clears the client from the callbacks' routing tables and the leftover records are dropped
+- `~WebSocketClient()` no longer releases a producer ID while the WebSocket session that owns it can still be writing to the buffer. `detach()`/`close()` only start an asynchronous teardown, so re-creating a still-connected client at the same `producer_offset` could previously hand a buffer to a new session while the old slick-net read loop was still writing to it — two writers on one single-producer buffer. The destructor never blocks: IDs whose buffers are still held are parked and reclaimed by the next construction (or `isProducerOffsetAvailable()` call) that finds them free
+- A `WebSocketClient` constructor that throws now releases the producer IDs it claimed and cleans up its data handler, so the `producer_offset` remains usable
+
+### Changed
+- Control records now carry the 64-bit client ID instead of the client pointer; `MESSAGE_HEADER_SIZE` is unchanged on 64-bit platforms but is no longer tied to the pointer width
+
 ## [1.0.1] - 2026-06-23
 
 ### Changed

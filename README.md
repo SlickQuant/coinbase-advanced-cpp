@@ -289,6 +289,64 @@ while (running) {
 }
 ```
 
+###### Reusing a `producer_offset`
+
+A `slick::stream_buffer_multiplexer` keeps its producers registered for its whole
+lifetime, so producers registered by a client outlive that client. Destroying a
+client and creating a new one with the same `producer_offset` on the same
+multiplexer reuses the already registered producer buffers (and their buffered
+data) instead of failing — the buffer-sizing and shared-memory-name arguments of
+the new client are ignored for producer IDs that are already registered, and a
+warning is logged when the requested sizes differ from the registered ones.
+
+Only a destroyed client's producers can be reused. A producer ID stays owned for
+as long as the client that registered it is alive, so constructing a second client
+at a `producer_offset` that overlaps a live client throws `std::invalid_argument`
+rather than silently interleaving two WebSockets into one buffer. Closing a client
+with `stop()` is not enough — ownership is released by the destructor.
+
+Ownership outlives the client object itself when a session is still shutting down.
+`detach()` and `close()` only *start* an asynchronous teardown, and slick-net's read
+loop keeps shared ownership of the producer buffer until its session actually ends —
+so handing the IDs straight back would let a new client write to a buffer the old
+session is still writing to.
+
+**Nothing waits for that.** `~WebSocketClient()` releases the IDs whose buffers are
+already free and *parks* the rest; it never blocks. A parked ID is reclaimed by the
+next construction (or `isProducerOffsetAvailable()` call) that finds its buffer free,
+so the usual "stop, wait for the disconnect callback, destroy, re-create" sequence
+sees no delay at all. Only re-creating at the same `producer_offset` while the
+previous session is *still closing* is refused, with `std::runtime_error`:
+
+```cpp
+old_client.reset();     // returns immediately, even mid-teardown
+
+// Non-blocking readiness check — poll it on your own schedule instead of blocking
+// a trading thread or catching exceptions in a retry loop.
+if (coinbase::WebSocketClient::isProducerOffsetAvailable(mux, offset)) {
+    new_client = std::make_unique<coinbase::WebSocketClient>(&callbacks, mux, MD_URL, "", offset);
+}
+```
+
+The two failure modes are deliberately different exception types: `std::invalid_argument`
+for an offset owned by a live client (a bug in the caller — retrying will not help) and
+`std::runtime_error` for a session that is still closing (transient — retry, or poll
+`isProducerOffsetAvailable()`).
+
+###### Destroying a client that shares a multiplexer
+
+Records already published stay in the multiplexer, so a client destroyed before
+`processData()` has drained them leaves control and data records behind.
+`~WebSocketClient()` drops every reference to itself, and those leftover records are
+discarded instead of being dispatched to a callback with a dangling
+`WebSocketClient*`. Control records carry `client->clientId()` — a process-wide
+unique ID that is never recycled — so a record from a destroyed client is never
+mistaken for one from a new client the allocator happens to place at the same
+address.
+
+This bookkeeping is not synchronized: **destroy a `WebSocketClient` on the thread
+that calls `processData()`, or stop calling `processData()` first.**
+
 ##### Cross-process market data logging
 
 Passing `md_read_buffer_shm_name` to the `WebSocketClient` constructor places the MD_DATA producer buffer in named shared memory. Combining this with a shared-memory fan-in queue lets a second process attach and read the same raw JSON stream — no extra network connection required.

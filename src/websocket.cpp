@@ -6,6 +6,153 @@
 
 namespace coinbase {
 
+namespace {
+
+// The producer ids a client owns: one CTRL and one DATA id per configured url.
+struct ProducerIds {
+    void add(uint32_t id) noexcept { ids_[count_++] = id; }
+    const uint32_t* begin() const noexcept { return ids_.data(); }
+    const uint32_t* end() const noexcept { return ids_.data() + count_; }
+    bool empty() const noexcept { return count_ == 0; }
+
+    std::array<uint32_t, ProducerType::_PRODUCER_TYPE_COUNT_> ids_{};
+    uint32_t count_ = 0;
+};
+
+ProducerIds ownedProducerIds(uint32_t producer_offset, bool has_market_data, bool has_user_data) noexcept {
+    ProducerIds ids;
+    if (has_user_data) {
+        ids.add(producer_offset + ProducerType::USER_CTRL);
+        ids.add(producer_offset + ProducerType::USER_DATA);
+    }
+    if (has_market_data) {
+        ids.add(producer_offset + ProducerType::MD_CTRL);
+        ids.add(producer_offset + ProducerType::MD_DATA);
+    }
+    return ids;
+}
+
+// Producer ids claimed by a WebSocketClient, keyed by multiplexer.
+//
+// slick::stream_buffer_multiplexer never unregisters a producer, so "already registered"
+// alone cannot tell a producer left behind by a destroyed client (safe to reuse) from one
+// a live client is still writing to (a producer_offset collision, which would interleave
+// two clients into one buffer). This registry draws that line: an id stays claimed for
+// the lifetime of the client that registered it, and for as long afterwards as that
+// client's websocket session can still be writing to the buffer.
+//
+// Only touched when a client is constructed or destroyed, never on the data path, so the
+// spin lock costs nothing here and the publish path stays lock-free.
+enum class ClaimState : uint8_t {
+    owned,              // a live WebSocketClient owns the id
+    pending_release,    // owner destroyed; frees up once its websocket session lets go
+};
+
+std::atomic_flag g_claims_lock;
+std::unordered_map<const slick::stream_buffer_multiplexer*, std::unordered_map<uint32_t, ClaimState>> g_producer_claims;
+
+struct ClaimsGuard {
+    ClaimsGuard() noexcept {
+        while (g_claims_lock.test_and_set(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+    }
+    ~ClaimsGuard() noexcept { g_claims_lock.clear(std::memory_order_release); }
+    ClaimsGuard(const ClaimsGuard&) = delete;
+    ClaimsGuard& operator=(const ClaimsGuard&) = delete;
+};
+
+// A producer buffer is free once nothing but the multiplexer owns it. slick-net's session
+// keeps shared ownership for as long as its read loop can still write to the buffer, and
+// detach()/close() only start that teardown asynchronously - ~Websocket() does not wait
+// for it. Handing the buffer to a new client any earlier would put two writers on one
+// single-producer buffer.
+bool producerQuiescent(slick::stream_buffer_multiplexer& mux, uint32_t id) noexcept {
+    if (!Websocket::is_running()) {
+        return true;    // no service thread, so no read loop can be writing
+    }
+    // The multiplexer's own reference plus the one get_producer_buffer() returns here.
+    constexpr long owned_by_multiplexer_only = 2;
+    if (mux.get_producer_buffer(id).use_count() > owned_by_multiplexer_only) {
+        return false;
+    }
+    // Pairs with the releasing thread dropping the last shared_ptr to the buffer.
+    std::atomic_thread_fence(std::memory_order_acquire);
+    return true;
+}
+
+// Reclaims `id` if its owner is gone and its session has let go. Caller holds the lock.
+bool reclaimIfReleased(slick::stream_buffer_multiplexer& mux,
+                       std::unordered_map<uint32_t, ClaimState>& claims,
+                       std::unordered_map<uint32_t, ClaimState>::iterator claim) {
+    if (claim->second == ClaimState::owned || !producerQuiescent(mux, claim->first)) {
+        return false;
+    }
+    claims.erase(claim);
+    return true;
+}
+
+enum class ClaimResult : uint8_t { ok, owned_by_live_client, session_still_writing };
+
+// Claims every id or none of them. Ids parked by a destroyed client are reclaimed here
+// once their session has let go, which is what lets "destroy, then re-create at the same
+// producer_offset" work without anyone waiting. On failure `conflict` receives the id.
+ClaimResult claimProducerIds(slick::stream_buffer_multiplexer& mux, const ProducerIds& ids, uint32_t& conflict) {
+    if (ids.empty()) {
+        return ClaimResult::ok;
+    }
+    ClaimsGuard guard;
+    auto it = g_producer_claims.find(&mux);
+    if (it == g_producer_claims.end()) {
+        it = g_producer_claims.emplace(&mux, std::unordered_map<uint32_t, ClaimState>{}).first;
+    }
+    else {
+        for (auto id : ids) {
+            auto claim = it->second.find(id);
+            if (claim == it->second.end()) {
+                continue;
+            }
+            if (!reclaimIfReleased(mux, it->second, claim)) {
+                conflict = id;
+                return claim->second == ClaimState::owned ? ClaimResult::owned_by_live_client
+                                                          : ClaimResult::session_still_writing;
+            }
+        }
+    }
+    for (auto id : ids) {
+        it->second[id] = ClaimState::owned;
+    }
+    return ClaimResult::ok;
+}
+
+// Never waits: ids whose buffer is already free are released, the rest are parked for a
+// later claim to reclaim. Destroying a client must not block a trading thread on a socket
+// teardown that runs on slick-net's service thread.
+void releaseProducerIds(slick::stream_buffer_multiplexer& mux, const ProducerIds& ids) {
+    if (ids.empty()) {
+        return;
+    }
+    ClaimsGuard guard;
+    auto it = g_producer_claims.find(&mux);
+    if (it == g_producer_claims.end()) {
+        return;
+    }
+    for (auto id : ids) {
+        auto claim = it->second.find(id);
+        if (claim == it->second.end()) {
+            continue;
+        }
+        claim->second = ClaimState::pending_release;
+        reclaimIfReleased(mux, it->second, claim);
+    }
+    if (it->second.empty()) {
+        // Drop the entry so a multiplexer later allocated at the same address starts clean.
+        g_producer_claims.erase(it);
+    }
+}
+
+}   // anonymous namespace
+
 std::string to_string(WebSocketChannel channel) {
     switch(channel) {
     case WebSocketChannel::HEARTBEATS:
@@ -73,9 +220,10 @@ void UserThreadWebsocketCallbacks::resetUserDataSequence(WebSocketClient *ws_cli
     user_seq_nums_.erase(ws_client);
 }
 
-void UserThreadWebsocketCallbacks::addClient(slick::stream_buffer_multiplexer &mux, uint32_t producer_offset) {
+void UserThreadWebsocketCallbacks::addClient(WebSocketClient* client, slick::stream_buffer_multiplexer &mux, uint32_t producer_offset) {
     assert(!mux_ || mux_ == &mux);
     mux_ = &mux;
+    live_clients_[client->clientId()] = client;
     auto sz = producer_offset + ProducerType::_PRODUCER_TYPE_COUNT_;
     if (clients_.size() < sz) {
         clients_.resize(sz, nullptr);
@@ -83,6 +231,20 @@ void UserThreadWebsocketCallbacks::addClient(slick::stream_buffer_multiplexer &m
     if (producer_types_.size() < sz) {
         producer_types_.resize(sz, ProducerType::_PRODUCER_TYPE_COUNT_);
     }
+}
+
+void UserThreadWebsocketCallbacks::removeClient(WebSocketClient* client) {
+    // Records this client already published stay in the multiplexer, so drop every
+    // reference to it here: processData() skips control records whose client id is no
+    // longer live, and the nulled routing slots make it skip pending data records too.
+    live_clients_.erase(client->clientId());
+    for (auto &c : clients_) {
+        if (c == client) {
+            c = nullptr;
+        }
+    }
+    md_seq_nums_.erase(client);
+    user_seq_nums_.erase(client);
 }
 
 void UserThreadWebsocketCallbacks::mapProducerType(uint32_t producer_id, ProducerType pt) {
@@ -108,10 +270,15 @@ void UserThreadWebsocketCallbacks::processData(uint32_t max_drain_count) {
         switch (prod_type) {
             case ProducerType::MD_CTRL:
             case ProducerType::USER_CTRL: {
+                uint64_t client_id = 0;
+                memcpy(&client_id, record.data, sizeof(client_id));
+                auto client_it = live_clients_.find(client_id);
+                if (client_it == live_clients_.end()) {
+                    continue;   // control record left behind by a destroyed client
+                }
+                WebSocketClient* client = client_it->second;
                 const char* data_ptr = reinterpret_cast<const char*>(record.data);
-                WebSocketClient* client = nullptr;
-                memcpy(&client, record.data, sizeof(WebSocketClient*));
-                MessageType type { static_cast<const char>(record.data[sizeof(WebSocketClient*)]) };
+                MessageType type { static_cast<const char>(record.data[sizeof(client_id)]) };
                 data_ptr += MESSAGE_HEADER_SIZE;
                 switch (type) {
                     case MessageType::MARKET_CONNECTED:
@@ -266,9 +433,56 @@ WebSocketClient::~WebSocketClient() {
         delete data_handler_;
     }
     else {
+        user_thread_callbacks_->removeClient(this);
         user_thread_callbacks_ = nullptr;
     }
     data_handler_ = nullptr;
+
+    // Hand the producer ids back so a client created later with the same producer_offset can
+    // reuse the producers this one leaves registered in the mux. Ids whose session is still
+    // closing are parked rather than waited on - see releaseProducerIds().
+    releaseProducerIds(mux_, ownedProducerIds(producer_offset_, !market_data_url_.empty(), !user_data_url_.empty()));
+}
+
+bool WebSocketClient::isProducerOffsetAvailable(slick::stream_buffer_multiplexer& mux, uint32_t producer_offset) noexcept {
+    ClaimsGuard guard;
+    auto it = g_producer_claims.find(&mux);
+    if (it == g_producer_claims.end()) {
+        return true;
+    }
+    bool available = true;
+    for (uint32_t i = 0; i < ProducerType::_PRODUCER_TYPE_COUNT_; ++i) {
+        auto claim = it->second.find(producer_offset + i);
+        if (claim != it->second.end() && !reclaimIfReleased(mux, it->second, claim)) {
+            available = false;
+        }
+    }
+    if (it->second.empty()) {
+        g_producer_claims.erase(it);
+    }
+    return available;
+}
+
+std::shared_ptr<slick::stream_buffer_multiplexer::producer_buffer> WebSocketClient::addOrReuseProducer(
+    uint32_t producer_id,
+    uint64_t capacity,
+    uint32_t control_size,
+    const char* shm_name
+) {
+    // The multiplexer keeps producers registered for its whole lifetime, so an external
+    // multiplexer still holds the producers of an already destroyed client. Reuse that
+    // registration - re-adding it would throw std::invalid_argument.
+    if (auto existing = mux_.get_producer_buffer(producer_id)) {
+        if (existing->capacity() != capacity || existing->control_size() != control_size) {
+            LOG_WARN("Reusing producer {} registered with capacity {} and record size {}, requested capacity {} and record size {}.",
+                     producer_id, existing->capacity(), existing->control_size(), capacity, control_size);
+        }
+        else {
+            LOG_DEBUG("Reusing producer {} already registered in the stream buffer multiplexer.", producer_id);
+        }
+        return existing;
+    }
+    return mux_.add_producer(producer_id, capacity, control_size, shm_name);
 }
 
 void WebSocketClient::init(
@@ -284,8 +498,52 @@ void WebSocketClient::init(
     assert(producer_offset_ + ProducerType::_PRODUCER_TYPE_COUNT_ < std::numeric_limits<uint32_t>::max());
     producer_buffers_.resize(producer_offset_ + ProducerType::_PRODUCER_TYPE_COUNT_, nullptr);
 
+    // Claim before registering anything: a producer left behind by a destroyed client is
+    // reusable, one a live client still owns is a producer_offset collision.
+    const auto owned_ids = ownedProducerIds(producer_offset_, !market_data_url_.empty(), !user_data_url_.empty());
+    uint32_t conflict = 0;
+    switch (claimProducerIds(mux_, owned_ids, conflict)) {
+    case ClaimResult::owned_by_live_client:     // a bug in the caller: overlapping offsets
+        throw std::invalid_argument("producer_id " + std::to_string(conflict) +
+            " is owned by a live WebSocketClient. Give each client sharing a multiplexer its own producer_offset.");
+    case ClaimResult::session_still_writing:    // transient: the previous session is closing
+        throw std::runtime_error("producer_id " + std::to_string(conflict) +
+            " is still being written by the websocket session of a destroyed WebSocketClient. Retry once "
+            "WebSocketClient::isProducerOffsetAvailable() returns true.");
+    case ClaimResult::ok:
+        break;
+    }
+
+    try {
+        initProducers(callbacks, md_read_buffer_size, md_record_size, md_read_buffer_shm_name,
+                      user_read_buffer_size, user_record_size, user_read_buffer_shm_name, write_buffer_size);
+    }
+    catch (...) {
+        // ~WebSocketClient() never runs for a failed constructor, so undo by hand.
+        if (user_thread_callbacks_) {
+            user_thread_callbacks_->removeClient(this);
+        }
+        else {
+            delete data_handler_;
+        }
+        data_handler_ = nullptr;
+        releaseProducerIds(mux_, owned_ids);
+        throw;
+    }
+}
+
+void WebSocketClient::initProducers(
+    WebsocketCallbacks *callbacks,
+    uint32_t md_read_buffer_size,
+    uint32_t md_record_size,
+    const char* md_read_buffer_shm_name,
+    uint32_t user_read_buffer_size,
+    uint32_t user_record_size,
+    const char* user_read_buffer_shm_name,
+    uint32_t write_buffer_size
+) {
     if (user_thread_callbacks_) {
-        user_thread_callbacks_->addClient(mux_, producer_offset_);
+        user_thread_callbacks_->addClient(this, mux_, producer_offset_);
         data_handler_ = user_thread_callbacks_;
     }
     else {
@@ -295,14 +553,14 @@ void WebSocketClient::init(
 
     if (!user_data_url_.empty()) {
         uint32_t pid = producer_offset_ + ProducerType::USER_CTRL;
-        auto user_ctrl_pb = mux_.add_producer(pid, 4096, 256);
+        auto user_ctrl_pb = addOrReuseProducer(pid, 4096, 256);
         producer_buffers_[pid] = user_ctrl_pb.get();
         if (user_thread_callbacks_) {
             user_thread_callbacks_->mapProducerType(pid, ProducerType::USER_CTRL);
         }
         pid = producer_offset_ + ProducerType::USER_DATA;
         user_data_producer_id_ = pid;
-        auto user_data_pb = mux_.add_producer(pid, user_read_buffer_size, user_record_size, user_read_buffer_shm_name);
+        auto user_data_pb = addOrReuseProducer(pid, user_read_buffer_size, user_record_size, user_read_buffer_shm_name);
         producer_buffers_[pid] = user_data_pb.get();
         if (user_thread_callbacks_) {
             user_thread_callbacks_->mapProducerType(pid, ProducerType::USER_DATA);
@@ -320,14 +578,14 @@ void WebSocketClient::init(
 
     if (!market_data_url_.empty()) {
         uint32_t pid = producer_offset_ + ProducerType::MD_CTRL;
-        auto md_ctrl_pb = mux_.add_producer(pid, 4096, 256);
+        auto md_ctrl_pb = addOrReuseProducer(pid, 4096, 256);
         producer_buffers_[pid] = md_ctrl_pb.get();
         if (user_thread_callbacks_) {
             user_thread_callbacks_->mapProducerType(pid, ProducerType::MD_CTRL);
         }
         pid = producer_offset_ + ProducerType::MD_DATA;
         md_data_producer_id_ = pid;
-        auto md_data_pb = mux_.add_producer(pid, md_read_buffer_size, md_record_size, md_read_buffer_shm_name);
+        auto md_data_pb = addOrReuseProducer(pid, md_read_buffer_size, md_record_size, md_read_buffer_shm_name);
         producer_buffers_[pid] = md_data_pb.get();
         if (user_thread_callbacks_) {
             user_thread_callbacks_->mapProducerType(pid, ProducerType::MD_DATA);
@@ -434,10 +692,9 @@ void WebSocketClient::dispatchData(ProducerType pt, const char* data, std::size_
     auto *pb = producer_buffers_[producer_offset_ + pt];
     if (pb) [[likely]] {
         auto sz = (uint32_t)(MESSAGE_HEADER_SIZE + size);
-        void *self = this;
         auto [ptr, n] = pb->prepare(sz);
-        memcpy(ptr, &self, sizeof(WebSocketClient*));
-        ptr[sizeof(WebSocketClient*)] = static_cast<char>(type);
+        memcpy(ptr, &client_id_, sizeof(client_id_));
+        ptr[sizeof(client_id_)] = static_cast<char>(type);
         memcpy(ptr + MESSAGE_HEADER_SIZE, data, size);
         pb->commit(sz);
         pb->consume(sz);

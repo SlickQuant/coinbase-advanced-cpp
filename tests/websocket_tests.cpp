@@ -453,12 +453,26 @@ namespace coinbase::tests {
     // pure-virtual callbacks — used by the unit tests that need an instantiable
     // version without live network connections.
     struct ConcreteUserThreadCallbacks : public UserThreadWebsocketCallbacks {
-        void onMarketDataConnected(WebSocketClient*) override {}
+        uint32_t md_connected_count = 0;
+        uint32_t md_disconnected_count = 0;
+        uint32_t l2_update_count = 0;
+        WebSocketClient* last_client = nullptr;
+
+        void onMarketDataConnected(WebSocketClient* client) override {
+            ++md_connected_count;
+            last_client = client;
+        }
         void onUserDataConnected(WebSocketClient*) override {}
-        void onMarketDataDisconnected(WebSocketClient*) override {}
+        void onMarketDataDisconnected(WebSocketClient* client) override {
+            ++md_disconnected_count;
+            last_client = client;
+        }
         void onUserDataDisconnected(WebSocketClient*) override {}
         void onLevel2Snapshot(WebSocketClient*, uint64_t, const Level2UpdateBatch&) override {}
-        void onLevel2Updates(WebSocketClient*, uint64_t, const Level2UpdateBatch&) override {}
+        void onLevel2Updates(WebSocketClient* client, uint64_t, const Level2UpdateBatch&) override {
+            ++l2_update_count;
+            last_client = client;
+        }
         void onMarketTradesSnapshot(WebSocketClient*, uint64_t, const std::vector<MarketTrade>&) override {}
         void onMarketTrades(WebSocketClient*, uint64_t, const std::vector<MarketTrade>&) override {}
         void onTickerSnapshot(WebSocketClient*, uint64_t, uint64_t, const std::vector<Ticker>&) override {}
@@ -520,6 +534,271 @@ namespace coinbase::tests {
             ProducerType::_PRODUCER_TYPE_COUNT_  // producer_offset = 4
         );
         EXPECT_EQ(&client1->streamBufferMultiplexer(), &client2->streamBufferMultiplexer());
+    }
+
+    // Non-connecting URLs: init() registers the producers but the websockets stay
+    // DISCONNECTED until subscribe() calls open(), so these tests touch no network.
+    static std::unique_ptr<WebSocketClient> makeExternalMuxClient(
+        UserThreadWebsocketCallbacks &callbacks,
+        slick::stream_buffer_multiplexer &mux,
+        uint32_t producer_offset,
+        uint32_t buffer_size = 1u << 16,
+        uint32_t record_size = 256
+    ) {
+        return std::make_unique<WebSocketClient>(
+            &callbacks, mux,
+            "ws://127.0.0.1:1/md", "ws://127.0.0.1:1/user",
+            producer_offset,
+            buffer_size, record_size, nullptr,
+            buffer_size, record_size, nullptr,
+            1u << 12
+        );
+    }
+
+    // slick::stream_buffer_multiplexer has no remove_producer(), so an external mux
+    // still holds the producers of a destroyed client. Re-creating a client with the
+    // same producer_offset must reuse them instead of throwing from add_producer().
+    TEST(WebSocketClientUnitTests, RecreatedClientReusesProducersOnExternalMux) {
+        ConcreteUserThreadCallbacks callbacks;
+        slick::stream_buffer_multiplexer mux(1024);
+        constexpr uint32_t kOffset = 0;
+        constexpr size_t kProducerCount = static_cast<size_t>(ProducerType::_PRODUCER_TYPE_COUNT_);
+
+        auto client = makeExternalMuxClient(callbacks, mux, kOffset);
+        ASSERT_EQ(mux.producer_count(), kProducerCount);
+
+        std::array<const slick::stream_buffer_multiplexer::producer_buffer*, kProducerCount> first{};
+        for (uint32_t i = 0; i < kProducerCount; ++i) {
+            first[i] = mux.get_producer_buffer(kOffset + i).get();
+            ASSERT_NE(first[i], nullptr);
+        }
+
+        client.reset();     // client destroyed, its producers stay registered in the mux
+
+        ASSERT_NO_THROW(client = makeExternalMuxClient(callbacks, mux, kOffset));
+        EXPECT_EQ(mux.producer_count(), kProducerCount);
+        for (uint32_t i = 0; i < kProducerCount; ++i) {
+            EXPECT_EQ(mux.get_producer_buffer(kOffset + i).get(), first[i]);
+        }
+    }
+
+    // Reuse must also win when the new client asks for a different buffer geometry:
+    // the registered producer keeps its original capacity and record size (logged as
+    // a warning) rather than the reuse failing.
+    TEST(WebSocketClientUnitTests, RecreatedClientWithDifferentGeometryReusesProducer) {
+        ConcreteUserThreadCallbacks callbacks;
+        slick::stream_buffer_multiplexer mux(1024);
+        constexpr uint32_t kOffset = ProducerType::_PRODUCER_TYPE_COUNT_;
+
+        auto client = makeExternalMuxClient(callbacks, mux, kOffset, 1u << 16, 256);
+        const auto* md_data = mux.get_producer_buffer(kOffset + ProducerType::MD_DATA).get();
+        ASSERT_NE(md_data, nullptr);
+        const auto capacity = md_data->capacity();
+        const auto control_size = md_data->control_size();
+
+        client.reset();
+
+        ASSERT_NO_THROW(client = makeExternalMuxClient(callbacks, mux, kOffset, 1u << 17, 512));
+        const auto* reused = mux.get_producer_buffer(kOffset + ProducerType::MD_DATA).get();
+        EXPECT_EQ(reused, md_data);
+        EXPECT_EQ(reused->capacity(), capacity);
+        EXPECT_EQ(reused->control_size(), control_size);
+    }
+
+    // Only a destroyed client's producers may be reused: while a client is alive its
+    // producer ids are owned, and a second client at the same producer_offset would
+    // interleave two websockets into one buffer. That must be rejected up front.
+    TEST(WebSocketClientUnitTests, ProducerOffsetOwnedByLiveClientIsRejected) {
+        ConcreteUserThreadCallbacks callbacks;
+        slick::stream_buffer_multiplexer mux(1024);
+        constexpr uint32_t kOffset = 0;
+        constexpr size_t kProducerCount = static_cast<size_t>(ProducerType::_PRODUCER_TYPE_COUNT_);
+
+        auto client = makeExternalMuxClient(callbacks, mux, kOffset);
+        const auto* md_data = mux.get_producer_buffer(kOffset + ProducerType::MD_DATA).get();
+
+        EXPECT_THROW(makeExternalMuxClient(callbacks, mux, kOffset), std::invalid_argument);
+
+        // The live client keeps its producers; the rejected one registered nothing new.
+        EXPECT_EQ(mux.producer_count(), kProducerCount);
+        EXPECT_EQ(mux.get_producer_buffer(kOffset + ProducerType::MD_DATA).get(), md_data);
+
+        // ...and once it is destroyed the same offset is free again.
+        client.reset();
+        EXPECT_NO_THROW(client = makeExternalMuxClient(callbacks, mux, kOffset));
+    }
+
+    // A constructor that throws after claiming its producer ids must release them,
+    // otherwise the offset stays permanently unusable. A capacity that is not a power
+    // of two makes slick::stream_buffer throw from inside init().
+    TEST(WebSocketClientUnitTests, FailedConstructionReleasesProducerIds) {
+        ConcreteUserThreadCallbacks callbacks;
+        slick::stream_buffer_multiplexer mux(1024);
+        constexpr uint32_t kOffset = 0;
+
+        EXPECT_THROW(makeExternalMuxClient(callbacks, mux, kOffset, 1000 /*not a power of 2*/, 256),
+                     std::invalid_argument);
+
+        std::unique_ptr<WebSocketClient> client;
+        EXPECT_NO_THROW(client = makeExternalMuxClient(callbacks, mux, kOffset));
+    }
+
+    // detach() and close() only start an asynchronous teardown: slick-net's read loop keeps
+    // shared ownership of the producer buffer until its session actually ends, and
+    // ~Websocket() does not wait for that. Handing the ids straight back would let a new
+    // client write to a buffer the old session is still writing to - but the destructor
+    // must not wait for it either, so it parks the ids instead. The held shared_ptr below
+    // stands in for that read loop.
+    TEST(WebSocketClientUnitTests, DestructorParksProducerIdsWithoutBlocking) {
+        // Producer buffers can only be held while the websocket service thread runs. Start
+        // it with a throwaway client on its own multiplexer; the connection to a dead local
+        // port is refused straight away.
+        {
+            ConcreteUserThreadCallbacks starter_callbacks;
+            slick::stream_buffer_multiplexer starter_mux(1024);
+            auto starter = makeExternalMuxClient(starter_callbacks, starter_mux, 0);
+            starter->subscribe({"BTC-USD"}, {WebSocketChannel::LEVEL2});
+        }
+        ASSERT_TRUE(Websocket::is_running());
+
+        ConcreteUserThreadCallbacks callbacks;
+        slick::stream_buffer_multiplexer mux(1024);
+        constexpr uint32_t kOffset = 0;
+        auto client = makeExternalMuxClient(callbacks, mux, kOffset);
+
+        auto session_ref = mux.get_producer_buffer(kOffset + ProducerType::MD_DATA);
+        ASSERT_NE(session_ref, nullptr);
+
+        const auto start = std::chrono::steady_clock::now();
+        client.reset();
+        const auto elapsed = std::chrono::steady_clock::now() - start;
+        EXPECT_LT(elapsed, std::chrono::seconds(1));     // never waits on the session
+
+        // The ids are parked, not free: re-creating now would put a second writer on a
+        // buffer the old session still holds.
+        EXPECT_FALSE(WebSocketClient::isProducerOffsetAvailable(mux, kOffset));
+        EXPECT_THROW(makeExternalMuxClient(callbacks, mux, kOffset), std::runtime_error);
+
+        session_ref.reset();                             // "read loop ended"
+
+        EXPECT_TRUE(WebSocketClient::isProducerOffsetAvailable(mux, kOffset));
+        EXPECT_NO_THROW(client = makeExternalMuxClient(callbacks, mux, kOffset));
+    }
+
+    // A live client's offset is never merely "busy" - that is a caller bug, reported as
+    // std::invalid_argument so it can be told apart from the transient case above.
+    TEST(WebSocketClientUnitTests, LiveClientOffsetIsUnavailable) {
+        ConcreteUserThreadCallbacks callbacks;
+        slick::stream_buffer_multiplexer mux(1024);
+        constexpr uint32_t kOffset = 0;
+
+        EXPECT_TRUE(WebSocketClient::isProducerOffsetAvailable(mux, kOffset));
+        auto client = makeExternalMuxClient(callbacks, mux, kOffset);
+        EXPECT_FALSE(WebSocketClient::isProducerOffsetAvailable(mux, kOffset));
+
+        client.reset();
+        EXPECT_TRUE(WebSocketClient::isProducerOffsetAvailable(mux, kOffset));
+    }
+
+    // Client ids are never recycled, so a control record left behind by a destroyed
+    // client can never be mistaken for one from a new client that the allocator happens
+    // to place at the same address.
+    TEST(WebSocketClientUnitTests, ClientIdIsNeverReused) {
+        ConcreteUserThreadCallbacks callbacks;
+        slick::stream_buffer_multiplexer mux(1024);
+
+        auto client = makeExternalMuxClient(callbacks, mux, 0);
+        const uint64_t first_id = client->clientId();
+        client.reset();
+
+        client = makeExternalMuxClient(callbacks, mux, 0);
+        EXPECT_NE(client->clientId(), first_id);
+    }
+
+    // -------------------------------------------------------------------------
+    // Destroyed clients must not reach a callback through records they left behind
+    // in the multiplexer.
+    // -------------------------------------------------------------------------
+
+    // Publishes one record exactly the way WebSocketClient does, so processData() sees
+    // what a real client would have produced.
+    static void publishRecord(slick::stream_buffer_multiplexer &mux, uint32_t producer_id,
+                              const void* data, uint32_t size) {
+        auto pb = mux.get_producer_buffer(producer_id);
+        ASSERT_NE(pb, nullptr);
+        auto [ptr, n] = pb->prepare(size);
+        memcpy(ptr, data, size);
+        pb->commit(size);
+        pb->consume(size);
+    }
+
+    // Mirrors WebSocketClient::dispatchData(): client id, MessageType tag, payload.
+    static void publishCtrlRecord(slick::stream_buffer_multiplexer &mux, uint32_t producer_id,
+                                  uint64_t client_id, MessageType type) {
+        std::array<char, MESSAGE_HEADER_SIZE + 1> buf{};
+        memcpy(buf.data(), &client_id, sizeof(client_id));
+        buf[sizeof(client_id)] = static_cast<char>(type);
+        publishRecord(mux, producer_id, buf.data(), static_cast<uint32_t>(buf.size()));
+    }
+
+    static std::string l2UpdateMessage(uint64_t sequence_num) {
+        return std::string(R"({"channel":"l2_data","timestamp":"2026-03-05T09:05:32.483569449Z","sequence_num":)")
+            + std::to_string(sequence_num)
+            + R"(,"events":[{"type":"update","product_id":"BTC-USD","updates":[)"
+              R"({"side":"bid","event_time":"2026-03-05T09:05:32.449176Z","price_level":"72575","new_quantity":"1"}]}]})";
+    }
+
+    // A control record is delivered while the client that published it is alive - the
+    // baseline the two tests below measure against.
+    TEST(UserThreadWebsocketCallbacksUnitTests, CtrlRecordFromLiveClientIsDelivered) {
+        ConcreteUserThreadCallbacks callbacks;
+        slick::stream_buffer_multiplexer mux(1024);
+        auto client = makeExternalMuxClient(callbacks, mux, 0);
+
+        publishCtrlRecord(mux, ProducerType::MD_CTRL, client->clientId(), MessageType::MARKET_CONNECTED);
+        callbacks.processData(100);
+
+        EXPECT_EQ(callbacks.md_connected_count, 1u);
+        EXPECT_EQ(callbacks.last_client, client.get());
+    }
+
+    // The multiplexer cannot unpublish records, so a client destroyed before its control
+    // records are drained leaves them behind. They must be dropped, not handed to a
+    // callback as a dangling WebSocketClient*.
+    TEST(UserThreadWebsocketCallbacksUnitTests, CtrlRecordFromDestroyedClientIsDropped) {
+        ConcreteUserThreadCallbacks callbacks;
+        slick::stream_buffer_multiplexer mux(1024);
+        auto client = makeExternalMuxClient(callbacks, mux, 0);
+
+        publishCtrlRecord(mux, ProducerType::MD_CTRL, client->clientId(), MessageType::MARKET_CONNECTED);
+        client.reset();     // destroyed with the control record still queued
+        callbacks.processData(100);
+
+        EXPECT_EQ(callbacks.md_connected_count, 0u);
+        EXPECT_EQ(callbacks.last_client, nullptr);
+    }
+
+    // Same for data records: once the client is destroyed its routing slots are cleared,
+    // so queued market data is dropped instead of being dispatched with a dead pointer.
+    TEST(UserThreadWebsocketCallbacksUnitTests, DataRecordFromDestroyedClientIsDropped) {
+        ConcreteUserThreadCallbacks callbacks;
+        slick::stream_buffer_multiplexer mux(1024);
+        auto client = makeExternalMuxClient(callbacks, mux, 0);
+
+        // Connect first: that is what maps the MD_DATA producer id to the client.
+        publishCtrlRecord(mux, ProducerType::MD_CTRL, client->clientId(), MessageType::MARKET_CONNECTED);
+        const auto first = l2UpdateMessage(1);
+        publishRecord(mux, ProducerType::MD_DATA, first.data(), static_cast<uint32_t>(first.size()));
+        callbacks.processData(100);
+        ASSERT_EQ(callbacks.l2_update_count, 1u);
+        ASSERT_EQ(callbacks.last_client, client.get());
+
+        const auto second = l2UpdateMessage(2);
+        publishRecord(mux, ProducerType::MD_DATA, second.data(), static_cast<uint32_t>(second.size()));
+        client.reset();     // destroyed with the data record still queued
+        callbacks.processData(100);
+
+        EXPECT_EQ(callbacks.l2_update_count, 1u);
     }
 
     // processData() must skip records whose producer_id is beyond the range that
