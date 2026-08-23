@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-08-22
+
 ### Added
 - `WebSocketClient::isProducerOffsetAvailable(mux, producer_offset)` — non-blocking check that a client can be constructed at a `producer_offset`, so re-creating a client never needs a blocking wait or an exception-driven retry loop
 - `WebSocketClient::clientId()` — a process-wide unique ID that is never reused, carried by every control record so records from a destroyed client cannot be confused with records from a new client allocated at the same address
