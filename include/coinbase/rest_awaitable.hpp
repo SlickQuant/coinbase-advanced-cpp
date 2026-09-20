@@ -7,7 +7,6 @@
 #include <boost/asio/awaitable.hpp>
 #include <cmath>
 #include <cstdint>
-#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -32,17 +31,17 @@ namespace asio = boost::asio;
 
 namespace coinbase {
 
-class CoinbaseRestClient;
-
+// Every method below suspends on the awaiting coroutine's executor for the whole HTTP exchange, so
+// a slow request holds up neither the event loop nor the coroutines and timers sharing it.
 class CoinbaseAwaitableRestClient
 {
 public:
     CoinbaseAwaitableRestClient(std::string base_url = "https://api.coinbase.com");
-    ~CoinbaseAwaitableRestClient();
-    CoinbaseAwaitableRestClient(const CoinbaseAwaitableRestClient& other);
-    CoinbaseAwaitableRestClient& operator=(const CoinbaseAwaitableRestClient& other);
-    CoinbaseAwaitableRestClient(CoinbaseAwaitableRestClient&& other) noexcept;
-    CoinbaseAwaitableRestClient& operator=(CoinbaseAwaitableRestClient&& other) noexcept;
+    ~CoinbaseAwaitableRestClient() = default;
+    CoinbaseAwaitableRestClient(const CoinbaseAwaitableRestClient& other) = default;
+    CoinbaseAwaitableRestClient& operator=(const CoinbaseAwaitableRestClient& other) = default;
+    CoinbaseAwaitableRestClient(CoinbaseAwaitableRestClient&& other) noexcept = default;
+    CoinbaseAwaitableRestClient& operator=(CoinbaseAwaitableRestClient&& other) noexcept = default;
 
     void set_base_url(std::string_view url);
     std::string_view base_url() const noexcept { return base_url_; }
@@ -144,7 +143,6 @@ public:
 private:
     std::string base_url_;
     std::string domain_;
-    std::unique_ptr<CoinbaseRestClient> sync_client_;
 };
 
 }   // end namespace coinbase

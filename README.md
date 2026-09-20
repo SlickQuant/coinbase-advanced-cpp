@@ -135,7 +135,7 @@ auto positions = client.list_futures_positions();
 
 #### Async REST Client
 
-`CoinbaseAwaitableRestClient` mirrors every `CoinbaseRestClient` method as a C++20 coroutine returning `asio::awaitable<T>`, so the same endpoints (including all of the ones listed in [API Endpoints](#api-endpoints)) can be awaited from coroutine-based code:
+`CoinbaseAwaitableRestClient` exposes the same endpoints as `CoinbaseRestClient` (including all of the ones listed in [API Endpoints](#api-endpoints)) as C++20 coroutines returning `asio::awaitable<T>`, so they can be awaited from coroutine-based code:
 
 ```cpp
 #include <coinbase/rest_awaitable.hpp>
@@ -149,6 +149,18 @@ asio::awaitable<void> run() {
     // ...
 }
 ```
+
+Every call suspends for the whole HTTP exchange on the executor that awaits it, so the event loop
+stays free to run timers and other coroutines while a request is in flight - a slow REST call holds
+up nothing but its own coroutine. Both clients share a single definition per endpoint, so they
+always send the same request and parse the same response.
+
+Constructing a client primes a shared product cache; the first client created anywhere in the
+process does that with one blocking request, so build the client before entering the event loop
+rather than from inside a coroutine.
+
+The two fee-rate helpers, `get_taker_fee_rate()` and `get_maker_fee_rate()`, are available on the
+synchronous client only.
 
 #### WebSocket Client
 

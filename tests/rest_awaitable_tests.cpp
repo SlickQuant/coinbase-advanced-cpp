@@ -8,6 +8,8 @@
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/io_context.hpp>
+#include <boost/asio/steady_timer.hpp>
+#include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
 
 #include <slick/logger.hpp>
@@ -637,5 +639,46 @@ TEST_F(CoinbaseAwaitableTest, ConcurrentOperationsTest) {
         co_return;
     });
 }
+
+// ============================================================================
+// Executor Blocking Regression Test
+// ============================================================================
+
+// Every awaitable REST method used to co_return the result of a blocking call, so the HTTP round
+// trip ran to completion on the executor that awaited it - stalling timers and every other
+// coroutine sharing that event loop. A REST call must suspend instead, leaving the loop free while
+// the request is in flight.
+TEST_F(CoinbaseAwaitableTest, RestCallDoesNotBlockExecutorTest) {
+    // Single-threaded io_context, so plain types are enough here.
+    int ticks = 0;
+    bool request_done = false;
+
+    asio::co_spawn(*io_context_, [&]() -> asio::awaitable<void> {
+        auto products = co_await client_.list_public_products();
+        EXPECT_FALSE(products.empty());
+        request_done = true;
+        co_return;
+    }, asio::detached);
+
+    asio::co_spawn(*io_context_, [&]() -> asio::awaitable<void> {
+        asio::steady_timer timer(co_await asio::this_coro::executor);
+        while (!request_done) {
+            timer.expires_after(std::chrono::milliseconds(1));
+            co_await timer.async_wait(asio::use_awaitable);
+            ++ticks;
+        }
+        co_return;
+    }, asio::detached);
+
+    io_context_->run();
+    io_context_->restart();
+
+    ASSERT_TRUE(request_done);
+    // A blocking implementation never lets the timer run before the request completes, so this
+    // would be 0.
+    EXPECT_GT(ticks, 1) << "REST call blocked the executor for the whole request";
+    LOG_INFO("Timer ticked {} times while the REST request was in flight", ticks);
+}
+
 
 }  // namespace coinbase::tests

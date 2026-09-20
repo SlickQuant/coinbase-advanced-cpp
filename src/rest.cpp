@@ -3,384 +3,111 @@
 // https://github.com/SlickQuant/slick-socket
 
 #include <coinbase/rest.hpp>
-#include <coinbase/auth.hpp>
-#include <coinbase/utils.hpp>
-#include <nlohmann/json.hpp>
-#include <slick/net/http.hpp>
-#include <format>
-#include <numeric>
-#include <algorithm>
-
-using json = nlohmann::json;
-using Http = slick::net::Http;
+#include "rest_endpoints.hpp"
 
 namespace coinbase {
 
 std::once_flag CoinbaseRestClient::initialize_products_;
 std::unordered_map<std::string, Product> CoinbaseRestClient::products_;
 
+namespace {
+
+std::string extract_domain(std::string_view base_url) {
+    auto pos = base_url.find("://");
+    if (pos == std::string_view::npos) {
+        return std::string(base_url);
+    }
+    return std::string(base_url.substr(pos + 3));
+}
+
+}   // namespace
+
 CoinbaseRestClient::CoinbaseRestClient(std::string base_url)
     : base_url_(std::move(base_url))
+    , domain_(extract_domain(base_url_))
 {
-    auto pos = base_url_.find("://");
-    if (pos == std::string::npos) {
-        domain_ = base_url_;
-    }
-    else {
-        domain_ = base_url_.substr(pos + 3);
-    }
-    std::call_once(initialize_products_, [this](){
-        auto product_list = list_public_products();
-        for (auto &prod : product_list) {
-            products_.emplace(prod.product_id, std::move(prod));
-        }
-    });
+    initialize_products(base_url_);
 }
 
 const Product& CoinbaseRestClient::product(std::string_view product_id) {
     return products_[std::string(product_id)];
 }
 
+void CoinbaseRestClient::initialize_products(std::string_view base_url) {
+    std::call_once(initialize_products_, [base_url]() {
+        for (auto &prod : detail::run(detail::list_public_products(base_url, {}))) {
+            products_.emplace(prod.product_id, std::move(prod));
+        }
+    });
+}
+
 void CoinbaseRestClient::set_base_url(std::string_view url) {
     base_url_ = std::string(url);
-    auto pos = base_url_.find("://");
-    if (pos == std::string::npos) {
-        domain_ = base_url_;
-    }
-    else {
-        domain_ = base_url_.substr(pos + 3);
-    }
+    domain_ = extract_domain(base_url_);
 }
 
 uint64_t CoinbaseRestClient::get_server_time() const {
-    try {
-        auto res = Http::get(std::format("{}/api/v3/brokerage/time", base_url_));
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            return std::stoull(j["epochMillis"].get<std::string_view>().data());
-        }
-        LOG_ERROR("Failed to get_server_time. error: {}", res.result_text);
-    }
-    catch(const std::exception& e) {
-        LOG_ERROR("Failed to get_server_time. error: {}", e.what());
-    }
-    return {};
+    return detail::run(detail::get_server_time(base_url_));
 }
 
 std::vector<Account> CoinbaseRestClient::list_accounts(const AccountQueryParams &params) const {
-    try {
-        auto res = Http::get(std::format("{}/api/v3/brokerage/accounts{}", base_url_, params()), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/accounts", domain_).c_str())}
-        });
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            std::vector<Account> accounts = j["accounts"];
-            while (j.contains("has_next") && j["has_next"].get<bool>() && !j["cursor"].get<std::string_view>().empty()) {
-                AccountQueryParams new_params = params;
-                new_params.cursor = j["cursor"].get<std::string_view>();
-                res = Http::get(std::format("{}/api/v3/brokerage/accounts{}", base_url_, new_params()), {
-                    {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/accounts", domain_).c_str())}
-                });
-                if (res.is_ok()) {
-                    j = json::parse(res.result_text);
-                    accounts.insert(accounts.end(), std::make_move_iterator(j["accounts"].begin()), std::make_move_iterator(j["accounts"].end()));
-                }
-                else {
-                    LOG_ERROR("Failed to list accounts. error: {}", res.result_text);
-                    break;
-                }
-            }
-            return accounts;
-        }
-        LOG_ERROR("Failed to list accounts. error: {}", res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("Failed to list accounts. error: {}", e.what());
-    }
-    return {};
+    return detail::run(detail::list_accounts(base_url_, domain_, params));
 }
 
 Account CoinbaseRestClient::get_account(std::string_view account_uuid) const {
-    try {
-        auto res = Http::get(std::format("{}/api/v3/brokerage/accounts/{}", base_url_, account_uuid), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/accounts/{}", domain_, account_uuid).c_str())}
-        });
-        if (res.is_ok()) {
-            auto j_res = json::parse(res.result_text);
-            return j_res["account"].get<Account>();
-        }
-        LOG_ERROR("Failed to get account {}. error: {}", account_uuid, res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("Failed to get account {}. error: {}", account_uuid, e.what());
-    }
-    return {};
+    return detail::run(detail::get_account(base_url_, domain_, account_uuid));
 }
 
 std::vector<Product> CoinbaseRestClient::list_products(const ProductQueryParams &params) const {
-    try {
-        auto res = Http::get(std::format("{}/api/v3/brokerage/products{}", base_url_, params()), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/products", domain_).c_str())}
-        });
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            return j["products"];
-        }
-        LOG_ERROR("Failed to get products. error: {}", res.result_text);
-    }
-    catch(const std::exception& e) {
-        LOG_ERROR("Failed to get products. error: {}", e.what());
-    }
-    return {};
+    return detail::run(detail::list_products(base_url_, domain_, params));
 }
 
 Product CoinbaseRestClient::get_product(std::string_view prod_id, bool get_tradability_status) const {
-    try {
-        auto res = Http::get(std::format("{}/api/v3/brokerage/products/{}{}", base_url_, prod_id, get_tradability_status ? "?get_tradability_status=true" : ""), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/products/{}", domain_, prod_id).c_str())}
-        });
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            return j.get<Product>();
-        }
-        LOG_ERROR("Failed to get product {}. error: {}", prod_id, res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("Failed to get product {}. error: {}", prod_id, e.what());
-    }
-    return {};
+    return detail::run(detail::get_product(base_url_, domain_, prod_id, get_tradability_status));
 }
 
 std::vector<Product> CoinbaseRestClient::list_public_products(const ProductQueryParams &params) const {
-    try {
-        auto res = Http::get(std::format("{}/api/v3/brokerage/market/products{}", base_url_, params()));
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            return j["products"];
-        }
-        LOG_ERROR("Failed to get products. error: {}", res.result_text);
-    }
-    catch(const std::exception& e) {
-        LOG_ERROR("Failed to get products. error: {}", e.what());
-    }
-    return {};
+    return detail::run(detail::list_public_products(base_url_, params));
 }
 
 Product CoinbaseRestClient::get_public_product(std::string_view prod_id) const {
-    try {
-        auto res = Http::get(std::format("{}/api/v3/brokerage/market/products/{}", base_url_, prod_id));
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            return j.get<Product>();
-        }
-        LOG_ERROR("Failed to get product {}. error: {}", prod_id, res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("Failed to get product {}. error: {}", prod_id, e.what());
-    }
-    return {};
+    return detail::run(detail::get_public_product(base_url_, prod_id));
 }
 
 std::vector<Order> CoinbaseRestClient::list_orders(const OrderQueryParams &query) const {
-    try {
-        auto res = Http::get(std::format("{}/api/v3/brokerage/orders/historical/batch{}", base_url_, query()), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/orders/historical/batch", domain_).c_str())}
-        });
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            std::vector<Order> orders = j["orders"];
-            while (j.contains("has_next") && j["has_next"].get<bool>() && !j["cursor"].get<std::string_view>().empty()) {
-                OrderQueryParams new_query = query;
-                new_query.cursor = j["cursor"].get<std::string_view>();
-                res = Http::get(std::format("{}/api/v3/brokerage/orders/historical/batch{}", base_url_, new_query()), {
-                    {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/orders/historical/batch", domain_).c_str())}
-                });
-                if (res.is_ok()) {
-                    j = json::parse(res.result_text);
-                    orders.insert(orders.end(), std::make_move_iterator(j["orders"].begin()), std::make_move_iterator(j["orders"].end()));
-                }
-                else {
-                    LOG_ERROR("Failed to list orders. error: {}", res.result_text);
-                    break;
-                }
-            }
-            return orders;
-        }
-        LOG_ERROR("Failed to list orders. error: {}", res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("Failed to list orders. error: {}", e.what());
-    }
-    return {};
+    return detail::run(detail::list_orders(base_url_, domain_, query));
 }
 
 Order CoinbaseRestClient::get_order(std::string_view order_id) const {
-    try {
-        auto res = Http::get(std::format("{}/api/v3/brokerage/orders/historical/{}", base_url_, order_id), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/orders/historical/{}", domain_, order_id).c_str())}
-        });
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            LOG_TRACE(j.dump().c_str());
-            return j["order"].get<Order>();
-        }
-        LOG_ERROR("Failed to get order {}. error: {}", order_id, res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("Failed to get order {}. error: {}", order_id, e.what());
-    }
-    return {};
+    return detail::run(detail::get_order(base_url_, domain_, order_id));
 }
 
 std::vector<Fill> CoinbaseRestClient::list_fills(const FillQueryParams &params) const {
-    try {
-        auto res = Http::get(std::format("{}/api/v3/brokerage/orders/historical/fills{}", base_url_, params()), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/orders/historical/fills", domain_).c_str())}
-        });
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            std::vector<Fill> fills = j["fills"];
-            while(j.contains("cursor") && !j["cursor"].get<std::string_view>().empty()) {
-                FillQueryParams new_query = params;
-                new_query.cursor = j["cursor"].get<std::string_view>();
-                res = Http::get(std::format("{}/api/v3/brokerage/orders/historical/fills{}", base_url_, new_query()), {
-                    {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/orders/historical/fills", domain_).c_str())}
-                });
-                if (res.is_ok()) {
-                    j = json::parse(res.result_text);
-                    fills.insert(fills.end(), std::make_move_iterator(j["fills"].begin()), std::make_move_iterator(j["fills"].end()));
-                }
-                else {
-                    LOG_ERROR("Failed to list orders. error: {}", res.result_text);
-                    break;
-                }
-            }
-            return fills;
-        }
-        LOG_ERROR("list_fills failed. error: {}", res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("list_fills failed. error: {}", e.what());
-    }
-    return {};
+    return detail::run(detail::list_fills(base_url_, domain_, params));
 }
 
 double CoinbaseRestClient::get_taker_fee_rate() const {
-    try {
-        auto res = Http::get(std::format("{}/api/v3/brokerage/transaction_summary", base_url_), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/transaction_summary", domain_).c_str())}
-        });
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            return atof(j["fee_tier"]["taker_fee_rate"].get<std::string>().c_str());
-        }
-        LOG_ERROR("get_taker_fee_rate failed. error: {}", res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("get_taker_fee_rate failed. error: {}", e.what());
-    }
-    return 0.0012;
+    return detail::run(detail::get_taker_fee_rate(base_url_, domain_));
 }
 
 double CoinbaseRestClient::get_maker_fee_rate() const {
-    try {
-        auto res = Http::get(std::format("{}/api/v3/brokerage/transaction_summary", base_url_), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/transaction_summary", domain_).c_str())}
-        });
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            return atof(j["fee_tier"]["maker_fee_rate"].get<std::string>().c_str());
-        }
-        LOG_ERROR("get_maker_fee_rate failed. error: {}", res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("get_maker_fee_rate failed. error: {}", e.what());
-    }
-    return 0.006;
+    return detail::run(detail::get_maker_fee_rate(base_url_, domain_));
 }
 
 std::vector<PriceBook> CoinbaseRestClient::get_best_bid_ask(const std::vector<std::string> &product_ids) const {
-    try {
-        if (product_ids.empty()) {
-            LOG_WARN("get_best_bid_ask empty product_ids provided");
-            return {};
-        }
-
-        std::vector<std::string> params(product_ids.size());
-        std::transform(product_ids.begin(), product_ids.end(), params.begin(),
-            [](const std::string &i) { return std::format("product_ids={}", i); });
-
-        auto query = std::format("?{}", std::accumulate(std::next(params.begin()), params.end(), params[0],
-            [](const std::string& a, const std::string &b) {
-                return a + "&" + b;
-            }));
-        auto res = Http::get(std::format("{}/api/v3/brokerage/best_bid_ask{}", base_url_, query), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/best_bid_ask", domain_).c_str())}
-        });
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            LOG_TRACE(j.dump().c_str());
-            return j["pricebooks"];
-        }
-        LOG_ERROR("get_best_bid_ask failed. error: {}", res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("get_best_bid_ask failed. error: {}", e.what());
-    }
-    return {};
+    return detail::run(detail::get_best_bid_ask(base_url_, domain_, product_ids));
 }
 
 PriceBookResponse CoinbaseRestClient::get_product_book(const PriceBookQueryParams &params) const {
-    try {
-        auto res = Http::get(std::format("{}/api/v3/brokerage/product_book{}", base_url_, params()), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/product_book", domain_).c_str())}
-        });
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            return j;
-        }
-        LOG_ERROR("get_product_book failed. error: {}", res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("get_product_book failed. error: {}", e.what());
-    }
-    return {};
+    return detail::run(detail::get_product_book(base_url_, domain_, params));
 }
 
 MarketTrades CoinbaseRestClient::get_market_trades(std::string_view product_id, const MarketTradesQueryParams &params) const {
-    try {
-        auto res = Http::get(std::format("{}/api/v3/brokerage/products/{}/ticker{}", base_url_, product_id, params()), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/products/{}/ticker", domain_, product_id).c_str())}
-        });
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            return j;
-        }
-        LOG_ERROR("get_market_trades failed. error: {}", res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("get_market_trades failed. error: {}", e.what());
-    }
-    return {};
+    return detail::run(detail::get_market_trades(base_url_, domain_, product_id, params));
 }
 
-std::vector<Candle> CoinbaseRestClient::get_product_candles(std::string_view product_id, const ProductCandlesQueryParams &params) const
-{
-    try {
-        LOG_TRACE(params().c_str());
-        auto res = Http::get(std::format("{}/api/v3/brokerage/products/{}/candles{}", base_url_, product_id, params()), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/products/{}/candles", domain_, product_id).c_str())}
-        });
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            return j["candles"];
-        }
-        LOG_ERROR("get_product_candles failed. error: {}", res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("get_market_trades failed. error: {}", e.what());
-    }
-    return {};
+std::vector<Candle> CoinbaseRestClient::get_product_candles(std::string_view product_id, const ProductCandlesQueryParams &params) const {
+    return detail::run(detail::get_product_candles(base_url_, domain_, product_id, params));
 }
 
 CreateOrderResponse CoinbaseRestClient::create_order(
@@ -403,301 +130,21 @@ CreateOrderResponse CoinbaseRestClient::create_order(
     std::optional<json> &&attached_order_configuration,
     std::optional<PredictionMetadata> &&prediction_metadata
 ) const {
-    CreateOrderResponse rsp;
+    auto order = detail::make_create_order(base_url_, domain_,
+        std::move(client_order_id), std::move(product_id), side, order_type, time_in_force, size,
+        limit_price, post_only, size_in_quote, stop_price, take_profit_price, end_time, twap_start_time,
+        std::move(sor_preference), std::move(leverage), std::move(margin_type),
+        std::move(attached_order_configuration), std::move(prediction_metadata));
+    if (order.req.url.empty()) {
+        return std::move(order.rejected);
+    }
     try {
-        json body {
-            {"client_order_id", client_order_id},
-            {"product_id", product_id},
-            {"side", to_string(side)},
-            {"order_configuration", {}}
-        };
-        auto &order_configuration = body["order_configuration"];
-        switch (order_type) {
-            case OrderType::MARKET: {
-                if (!std::isnan(limit_price)) {
-                    LOG_WARN("limit price ignored. Limit price should not be set for market order");
-                }
-                if (time_in_force == TimeInForce::FILL_OR_KILL) {
-                    auto &config = order_configuration["market_market_fok"];
-                    if (size_in_quote) {
-                        config["quote_size"] = std::to_string(size);
-                    }
-                    else {
-                        config["base_size"] = std::to_string(size);
-                    }
-                }
-                else if (time_in_force == TimeInForce::IMMEDIATE_OR_CANCEL) {
-                    auto &config = order_configuration["market_market_ioc"];
-                    if (size_in_quote) {
-                        config["quote_size"] = std::to_string(size);
-                    }
-                    else {
-                        config["base_size"] = std::to_string(size);
-                    }
-                }
-                else {
-                    rsp.error_response.message = std::format("TimeInForce {} invalid for market order", to_string(time_in_force));
-                    rsp.success = false;
-                    LOG_ERROR(rsp.error_response.message.c_str());
-                    return rsp;
-                }
-
-                if (stop_price.has_value() && take_profit_price.has_value()) {
-                    auto &prod = product(product_id);
-                    if (prod.product_type == ProductType::SPOT && side == Side::SELL) {
-                        LOG_ERROR("Invalid order side for attached TP/SL");
-                        rsp.error_response.message = "Invalid order side for attached TP/SL";
-                        rsp.success = false;
-                        return rsp;
-                    }
-                    body["attached_order_configuration"] = {
-                        {"trigger_bracket_gtc", {
-                            {"limit_price", to_string(take_profit_price.value(), prod.quote_increment)},
-                            {"stop_trigger_price", to_string(stop_price.value(), prod.quote_increment)},
-                        }}
-                    };
-                }
-                else if (stop_price.has_value()) {
-                    if (side == Side::SELL) {
-
-                    }
-                    LOG_ERROR("braket order must have both stop_price and take_profit_price");
-                    rsp.error_response.message = "braket order must have both stop_price and take_profit_price";
-                    rsp.success = false;
-                    return rsp;
-                }
-                else {
-
-                }
-                break;
-            }
-            case OrderType::LIMIT: {
-                if (std::isnan(limit_price)) {
-                    LOG_ERROR("Invalid limit price NAN");
-                    rsp.error_response.message = "Invalid limit price NAN";
-                    rsp.success = false;
-                    return rsp;
-                }
-                if (time_in_force == TimeInForce::FILL_OR_KILL) {
-                    auto &config = order_configuration["limit_limit_fok"];
-                    if (size_in_quote) {
-                        config["quote_size"] = std::to_string(size);
-                    }
-                    else {
-                        config["base_size"] = std::to_string(size);
-                    }
-                    config["limit_price"] = to_string(limit_price, product(product_id).quote_increment);
-                }
-                else if (time_in_force == TimeInForce::IMMEDIATE_OR_CANCEL) {
-                    auto &config = order_configuration["sor_limit_ioc"];
-                    if (size_in_quote) {
-                        config["quote_size"] = std::to_string(size);
-                    }
-                    else {
-                        config["base_size"] = std::to_string(size);
-                    }
-                    config["limit_price"] = to_string(limit_price, product(product_id).quote_increment);
-                }
-                else if (time_in_force == TimeInForce::GOOD_UNTIL_CANCELLED) {
-                    auto &config = order_configuration["limit_limit_gtc"];
-                    if (size_in_quote) {
-                        config["quote_size"] = std::to_string(size);
-                    }
-                    else {
-                        config["base_size"] = std::to_string(size);
-                    }
-                    config["limit_price"] = to_string(limit_price, product(product_id).quote_increment);
-                    config["post_only"] = post_only;
-                }
-                else if (time_in_force == TimeInForce::GOOD_UNTIL_DATE_TIME) {
-                    if (!end_time.has_value()) {
-                        LOG_ERROR("end_time missing for limit_gtd order");
-                        rsp.error_response.message = "end_time missing for limit_gtd order";
-                        rsp.success = false;
-                        return rsp;
-                    }
-                    auto &config = order_configuration["limit_limit_gtd"];
-                    if (size_in_quote) {
-                        config["quote_size"] = std::to_string(size);
-                    }
-                    else {
-                        config["base_size"] = std::to_string(size);
-                    }
-                    config["limit_price"] = to_string(limit_price, product(product_id).quote_increment);
-                    config["post_only"] = post_only;
-                    config["end_time"] = timestamp_to_string(end_time.value());
-                }
-                else {
-                    rsp.error_response.message = std::format("TimeInForce {} invalid for market order", to_string(time_in_force));
-                    rsp.success = false;
-                    LOG_ERROR(rsp.error_response.message.c_str());
-                    return rsp;
-                }
-
-                if (stop_price.has_value() && take_profit_price.has_value()) {
-                    auto &prod = product(product_id);
-                    if (prod.product_type == ProductType::SPOT && side == Side::SELL) {
-                        LOG_ERROR("Invalid order side for attached TP/SL");
-                        rsp.error_response.message = "Invalid order side for attached TP/SL";
-                        rsp.success = false;
-                        return rsp;
-                    }
-                    body["attached_order_configuration"] = {
-                        {"trigger_bracket_gtc", {
-                            {"limit_price", to_string(take_profit_price.value(), prod.quote_increment)},
-                            {"stop_trigger_price", to_string(stop_price.value(), prod.quote_increment)},
-                        }}
-                    };
-                }
-                else if (stop_price.has_value() ^ take_profit_price.has_value()) {
-                    LOG_ERROR("braket order must have both stop_price and take_profit_price");
-                    rsp.error_response.message = "braket order must have both stop_price and take_profit_price";
-                    rsp.success = false;
-                    return rsp;
-                }
-                break;
-            }
-            case OrderType::STOP_LIMIT: {
-                if (size_in_quote) {
-                    LOG_ERROR("Invalid parameter. stop limit order size only in base_size");
-                    rsp.error_response.message = "Invalid parameter. stop limit order size only in base_size";
-                    rsp.success = false;
-                    return rsp;
-                }
-                if (!stop_price.has_value() || std::isnan(stop_price.value())) {
-                    LOG_ERROR("Invalid stop_price {}", stop_price.value_or(NAN));
-                    rsp.error_response.message = std::format("Invalid stop_price {}", stop_price.value_or(NAN));
-                    rsp.success = false;
-                    return rsp;
-                }
-                if (time_in_force == TimeInForce::GOOD_UNTIL_CANCELLED) {
-                    auto &config = order_configuration["stop_limit_stop_limit_gtc"];
-                    config["base_size"] = std::to_string(size);
-                    config["limit_price"] = to_string(limit_price, product(product_id).quote_increment);
-                    config["stop_price"] = to_string(stop_price.value(), product(product_id).quote_increment);
-                }
-                else if (time_in_force == TimeInForce::GOOD_UNTIL_DATE_TIME) {
-                    if (!end_time.has_value())
-                    {
-                        LOG_ERROR("end_time missing for limit_gtd order");
-                        rsp.error_response.message = "end_time missing for limit_gtd order";
-                        rsp.success = false;
-                        return rsp;
-                    }
-                    auto &config = order_configuration["stop_limit_stop_limit_gtd"];
-                    config["base_size"] = std::to_string(size);
-                    config["limit_price"] = to_string(limit_price, product(product_id).quote_increment);
-                    config["end_time"] = timestamp_to_string(end_time.value());
-                }
-                else {
-                    rsp.error_response.message = std::format("TimeInForce {} invalid for market order", to_string(time_in_force));
-                    rsp.success = false;
-                    LOG_ERROR(rsp.error_response.message.c_str());
-                    return rsp;
-                }
-                break;
-            }
-            case OrderType::TWAP: {
-                if (!twap_start_time.has_value() || !end_time.has_value()) {
-                    LOG_ERROR("twap order must have start and end time");
-                    rsp.error_response.message = "twap order must have start and end time";
-                    rsp.success = false;
-                    return rsp;
-                }
-
-                auto &config = order_configuration["twap_limit_gtd"];
-                if (size_in_quote) {
-                    config["quote_size"] = std::to_string(size);
-                }
-                else {
-                    config["base_size"] = std::to_string(size);
-                }
-                config["limit_price"] = to_string(limit_price, product(product_id).quote_increment);
-                config["start_time"] = timestamp_to_string(twap_start_time.value());
-                config["end_time"] = timestamp_to_string(end_time.value());
-                break;
-            }
-            case OrderType::BRACKET: {
-                auto &prod = product(product_id);
-                if (prod.product_type == ProductType::SPOT && side == Side::BUY) {
-                    LOG_ERROR("Invalid order side for Bracket order");
-                    rsp.error_response.message = "Invalid order side for Bracket order";
-                    rsp.success = false;
-                    return rsp;
-                }
-
-                if (size_in_quote) {
-                    LOG_ERROR("Invalid parameter. Bracket order size only in base_size");
-                    rsp.error_response.message = "Invalid parameter. Bracket order size only in base_size";
-                    rsp.success = false;
-                    return rsp;
-                }
-
-                if (stop_price.has_value() && take_profit_price.has_value()) {
-                    order_configuration["trigger_bracket_gtc"] = {
-                        {"base_size", std::to_string(size)},
-                        {"limit_price", to_string(take_profit_price.value(), prod.quote_increment)},
-                        {"stop_trigger_price", to_string(stop_price.value(), prod.quote_increment)},
-                    };
-                }
-                else if (stop_price.has_value() && !std::isnan(limit_price)) {
-                    // use limit_price as take_profit_price for stop loss only bracket order
-                    order_configuration["trigger_bracket_gtc"] = {
-                        {"base_size", std::to_string(size)},
-                        {"limit_price", to_string(limit_price, prod.quote_increment)},
-                        {"stop_trigger_price", to_string(stop_price.value(), prod.quote_increment)},
-                    };
-                }
-                else {
-                    LOG_ERROR("braket order must have both stop_price and take_profit_price");
-                    rsp.error_response.message = "braket order must have both stop_price and take_profit_price";
-                    rsp.success = false;
-                    return rsp;
-                }
-                break;
-            }
-            default: {
-                rsp.error_response.message = std::format("OrderType {} is not supported. client_order_id: {}", to_string(order_type), client_order_id);
-                LOG_ERROR(rsp.error_response.message.c_str());
-                rsp.success = false;
-                return rsp;
-            }
-        }
-        if (leverage.has_value()) {
-            body["leverage"] = std::to_string(leverage.value());
-        }
-        if (margin_type.has_value()) {
-            body["margin_type"] = to_string(margin_type.value());
-        }
-        if (attached_order_configuration.has_value()) {
-            body["attached_order_configuration"] = attached_order_configuration.value();
-        }
-        body["sor_preference"] = to_string(sor_preference.value_or(SorPreference::SOR_ENABLED));
-        if (prediction_metadata.has_value()) {
-            to_json(body["prediction_metadata"], prediction_metadata.value());
-        }
-
-        LOG_TRACE("create order: {}", body.dump());
-        auto res = Http::post(std::format("{}/api/v3/brokerage/orders", base_url_), body.dump(), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("POST {}/api/v3/brokerage/orders", domain_).c_str())},
-            {"Content-Type", "application/json"}
-        });
-
-        rsp.success = res.is_ok();
-        if (!res.result_text.empty()) {
-            auto j = json::parse(res.result_text);
-            LOG_TRACE(j.dump().c_str());
-            return j;
-        }
-        rsp.error_response.message = std::format("Failed to create order. client_order_id: {} error: {}", client_order_id, res.result_text);
-        LOG_ERROR(rsp.error_response.message.c_str());
+        auto res = detail::send(order.req);
+        return detail::parse_create_order(res, order.client_order_id);
     }
     catch (const std::exception &e) {
-        rsp.error_response.message = std::format("Failed to create order. client_order_id: {}  error: {}", client_order_id, e.what());
-        LOG_ERROR(rsp.error_response.message.c_str());
+        return detail::create_order_failure(order.client_order_id, e.what());
     }
-    rsp.success = false;
-    return rsp;
 }
 
 ModifyOrderResponse CoinbaseRestClient::modify_order(
@@ -711,39 +158,10 @@ ModifyOrderResponse CoinbaseRestClient::modify_order(
 ) const {
     ModifyOrderResponse rsp;
     try {
-        json body {
-            {"order_id", order_id},
-            {"size", std::to_string(size)},
-        };
-        body["price"] = to_string(price, product(product_id).quote_increment);
-        if (stop_price.has_value() && take_profit_price.has_value()) {
-            auto &prod = product(product_id);
-            body["attached_order_configuration"] = {
-                {"trigger_bracket_gtc", {
-                    {"limit_price", to_string(take_profit_price.value(), prod.quote_increment)},
-                    {"stop_trigger_price", to_string(stop_price.value(), prod.quote_increment)},
-                }}
-            };
-        }
-        else if (stop_price.has_value()) {
-            body["stop_price"] = to_string(stop_price.value(), product(product_id).quote_increment);
-        }
-        if (cancel_attached_order.has_value()) {
-            body["cancel_attached_order"] = cancel_attached_order.value();
-        }
-
-        LOG_TRACE("modify order: {}", body.dump());
-        auto res = Http::post(std::format("{}/api/v3/brokerage/orders/edit", base_url_), body.dump(), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("POST {}/api/v3/brokerage/orders/edit", domain_).c_str())},
-            {"Content-Type", "application/json"}
-        });
-        rsp.success = res.is_ok();
-        if (!res.result_text.empty()) {
-            auto j = json::parse(res.result_text);
-            LOG_TRACE(j.dump().c_str());
-            return j;
-        }
-        LOG_ERROR("modify_order failed. order_id: {}, error: {}", order_id, res.reason);
+        auto req = detail::make_modify_order(base_url_, domain_, order_id, product_id, price, size,
+                                             stop_price, take_profit_price, cancel_attached_order);
+        auto res = detail::send(req);
+        return detail::parse_modify_order(res, order_id);
     }
     catch (const std::exception &e) {
         LOG_ERROR("modify_order failed. order_id: {}, error: {}", order_id, e.what());
@@ -753,556 +171,123 @@ ModifyOrderResponse CoinbaseRestClient::modify_order(
 }
 
 std::vector<CancelOrderResponse> CoinbaseRestClient::cancel_orders(const std::vector<std::string_view> &order_ids) const {
-    std::vector<CancelOrderResponse> rt;
     try {
-        json body {
-            {"order_ids", order_ids},
-        };
-
-        LOG_TRACE("cancel order: {}", body.dump());
-        auto res = Http::post(std::format("{}/api/v3/brokerage/orders/batch_cancel", base_url_), body.dump(), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("POST {}/api/v3/brokerage/orders/batch_cancel", domain_).c_str())},
-            {"Content-Type", "application/json"}
-        });
-        if (!res.result_text.empty()) {
-            auto j = json::parse(res.result_text);
-            LOG_TRACE(j.dump().c_str());
-            return j["results"];
-        }
-        LOG_ERROR("cancel_orders failed. error: {}", res.result_text);
-        for (auto oid : order_ids) {
-            CancelOrderResponse rsp;
-            rsp.success = false;
-            rsp.failure_reason = "INVALID_CANCEL_REQUEST";
-            rsp.order_id = oid;
-            rt.emplace_back(std::move(rsp));
-        }
+        auto req = detail::make_cancel_orders(base_url_, domain_, order_ids);
+        auto res = detail::send(req);
+        return detail::parse_cancel_orders(res, order_ids);
     }
     catch (const std::exception &e) {
-        for (auto oid : order_ids) {
-            CancelOrderResponse rsp;
-            rsp.success = false;
-            rsp.failure_reason = "INVALID_CANCEL_REQUEST";
-            rsp.order_id = oid;
-            rt.emplace_back(std::move(rsp));
-        }
         LOG_ERROR("cancel_orders failed. error: {}", e.what());
     }
-    return rt;
+    return detail::cancel_orders_failure(order_ids);
 }
 
 std::vector<Portfolio> CoinbaseRestClient::list_portfolios(std::optional<PortfolioType> portfolio_type) const {
-    try {
-        std::string query;
-        if (portfolio_type.has_value()) {
-            query = std::format("?portfolio_type={}", to_string(portfolio_type.value()));
-        }
-        auto res = Http::get(std::format("{}/api/v3/brokerage/portfolios{}", base_url_, query), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/portfolios", domain_).c_str())}
-        });
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            return j["portfolios"];
-        }
-        LOG_ERROR("list_portfolios failed. error: {}", res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("list_portfolios failed. error: {}", e.what());
-    }
-    return {};
+    return detail::run(detail::list_portfolios(base_url_, domain_, portfolio_type));
 }
 
 Portfolio CoinbaseRestClient::create_portfolio(std::string_view name) const {
-    try {
-        json body {
-            {"name", name},
-        };
-        auto res = Http::post(std::format("{}/api/v3/brokerage/portfolios", base_url_), body.dump(), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("POST {}/api/v3/brokerage/portfolios", domain_).c_str())},
-            {"Content-Type", "application/json"}
-        });
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            return j["portfolio"].get<Portfolio>();
-        }
-        LOG_ERROR("create_portfolio failed. error: {}", res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("create_portfolio failed. error: {}", e.what());
-    }
-    return {};
+    return detail::run(detail::create_portfolio(base_url_, domain_, name));
 }
 
 PortfolioBreakdown CoinbaseRestClient::get_portfolio_breakdown(std::string_view portfolio_uuid, std::optional<std::string_view> currency) const {
-    try {
-        std::string query;
-        if (currency.has_value()) {
-            query = std::format("?currency={}", currency.value());
-        }
-        auto res = Http::get(std::format("{}/api/v3/brokerage/portfolios/{}{}", base_url_, portfolio_uuid, query), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/portfolios/{}", domain_, portfolio_uuid).c_str())}
-        });
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            return j["breakdown"].get<PortfolioBreakdown>();
-        }
-        LOG_ERROR("get_portfolio_breakdown failed. portfolio_uuid: {}, error: {}", portfolio_uuid, res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("get_portfolio_breakdown failed. portfolio_uuid: {}, error: {}", portfolio_uuid, e.what());
-    }
-    return {};
+    return detail::run(detail::get_portfolio_breakdown(base_url_, domain_, portfolio_uuid, currency));
 }
 
 MovePortfolioFundsResult CoinbaseRestClient::move_portfolio_funds(double value, std::string_view currency, std::string_view source_portfolio_uuid, std::string_view target_portfolio_uuid) const {
-    try {
-        json body {
-            {"funds", {
-                {"value", std::to_string(value)},
-                {"currency", currency},
-            }},
-            {"source_portfolio_uuid", source_portfolio_uuid},
-            {"target_portfolio_uuid", target_portfolio_uuid},
-        };
-        auto res = Http::post(std::format("{}/api/v3/brokerage/portfolios/move_funds", base_url_), body.dump(), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("POST {}/api/v3/brokerage/portfolios/move_funds", domain_).c_str())},
-            {"Content-Type", "application/json"}
-        });
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            return j.get<MovePortfolioFundsResult>();
-        }
-        LOG_ERROR("move_portfolio_funds failed. error: {}", res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("move_portfolio_funds failed. error: {}", e.what());
-    }
-    return {};
+    return detail::run(detail::move_portfolio_funds(base_url_, domain_, value, currency, source_portfolio_uuid, target_portfolio_uuid));
 }
 
 Portfolio CoinbaseRestClient::edit_portfolio(std::string_view portfolio_uuid, std::string_view name) const {
-    try {
-        json body {
-            {"name", name},
-        };
-        auto res = Http::put(std::format("{}/api/v3/brokerage/portfolios/{}", base_url_, portfolio_uuid), body.dump(), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("PUT {}/api/v3/brokerage/portfolios/{}", domain_, portfolio_uuid).c_str())},
-            {"Content-Type", "application/json"}
-        });
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            return j["portfolio"].get<Portfolio>();
-        }
-        LOG_ERROR("edit_portfolio failed. portfolio_uuid: {}, error: {}", portfolio_uuid, res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("edit_portfolio failed. portfolio_uuid: {}, error: {}", portfolio_uuid, e.what());
-    }
-    return {};
+    return detail::run(detail::edit_portfolio(base_url_, domain_, portfolio_uuid, name));
 }
 
 bool CoinbaseRestClient::delete_portfolio(std::string_view portfolio_uuid) const {
-    try {
-        auto res = Http::del(std::format("{}/api/v3/brokerage/portfolios/{}", base_url_, portfolio_uuid), "", {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("DELETE {}/api/v3/brokerage/portfolios/{}", domain_, portfolio_uuid).c_str())}
-        });
-        if (res.is_ok()) {
-            return true;
-        }
-        LOG_ERROR("delete_portfolio failed. portfolio_uuid: {}, error: {}", portfolio_uuid, res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("delete_portfolio failed. portfolio_uuid: {}, error: {}", portfolio_uuid, e.what());
-    }
-    return false;
+    return detail::run(detail::delete_portfolio(base_url_, domain_, portfolio_uuid));
 }
 
 ConvertTrade CoinbaseRestClient::create_convert_quote(std::string_view from_account, std::string_view to_account, double amount) const {
-    try {
-        json body {
-            {"from_account", from_account},
-            {"to_account", to_account},
-            {"amount", std::to_string(amount)},
-        };
-        auto res = Http::post(std::format("{}/api/v3/brokerage/convert/quote", base_url_), body.dump(), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("POST {}/api/v3/brokerage/convert/quote", domain_).c_str())},
-            {"Content-Type", "application/json"}
-        });
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            return j["trade"].get<ConvertTrade>();
-        }
-        LOG_ERROR("create_convert_quote failed. error: {}", res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("create_convert_quote failed. error: {}", e.what());
-    }
-    return {};
+    return detail::run(detail::create_convert_quote(base_url_, domain_, from_account, to_account, amount));
 }
 
 ConvertTrade CoinbaseRestClient::get_convert_trade(std::string_view trade_id, std::string_view from_account, std::string_view to_account) const {
-    try {
-        auto query = std::format("?from_account={}&to_account={}", from_account, to_account);
-        auto res = Http::get(std::format("{}/api/v3/brokerage/convert/trade/{}{}", base_url_, trade_id, query), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/convert/trade/{}", domain_, trade_id).c_str())}
-        });
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            return j["trade"].get<ConvertTrade>();
-        }
-        LOG_ERROR("get_convert_trade failed. trade_id: {}, error: {}", trade_id, res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("get_convert_trade failed. trade_id: {}, error: {}", trade_id, e.what());
-    }
-    return {};
+    return detail::run(detail::get_convert_trade(base_url_, domain_, trade_id, from_account, to_account));
 }
 
 ConvertTrade CoinbaseRestClient::commit_convert_trade(std::string_view trade_id, std::string_view from_account, std::string_view to_account) const {
-    try {
-        json body {
-            {"from_account", from_account},
-            {"to_account", to_account},
-        };
-        auto res = Http::post(std::format("{}/api/v3/brokerage/convert/trade/{}", base_url_, trade_id), body.dump(), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("POST {}/api/v3/brokerage/convert/trade/{}", domain_, trade_id).c_str())},
-            {"Content-Type", "application/json"}
-        });
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            return j["trade"].get<ConvertTrade>();
-        }
-        LOG_ERROR("commit_convert_trade failed. trade_id: {}, error: {}", trade_id, res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("commit_convert_trade failed. trade_id: {}, error: {}", trade_id, e.what());
-    }
-    return {};
+    return detail::run(detail::commit_convert_trade(base_url_, domain_, trade_id, from_account, to_account));
 }
 
 std::vector<PaymentMethod> CoinbaseRestClient::list_payment_methods() const {
-    try {
-        auto res = Http::get(std::format("{}/api/v3/brokerage/payment_methods", base_url_), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/payment_methods", domain_).c_str())}
-        });
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            return j["payment_methods"];
-        }
-        LOG_ERROR("list_payment_methods failed. error: {}", res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("list_payment_methods failed. error: {}", e.what());
-    }
-    return {};
+    return detail::run(detail::list_payment_methods(base_url_, domain_));
 }
 
 PaymentMethod CoinbaseRestClient::get_payment_method(std::string_view payment_method_id) const {
-    try {
-        auto res = Http::get(std::format("{}/api/v3/brokerage/payment_methods/{}", base_url_, payment_method_id), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/payment_methods/{}", domain_, payment_method_id).c_str())}
-        });
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            return j["payment_method"].get<PaymentMethod>();
-        }
-        LOG_ERROR("get_payment_method failed. payment_method_id: {}, error: {}", payment_method_id, res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("get_payment_method failed. payment_method_id: {}, error: {}", payment_method_id, e.what());
-    }
-    return {};
+    return detail::run(detail::get_payment_method(base_url_, domain_, payment_method_id));
 }
 
 ApiKeyPermissions CoinbaseRestClient::get_api_key_permissions() const {
-    try {
-        auto res = Http::get(std::format("{}/api/v3/brokerage/key_permissions", base_url_), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/key_permissions", domain_).c_str())}
-        });
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            return j.get<ApiKeyPermissions>();
-        }
-        LOG_ERROR("get_api_key_permissions failed. error: {}", res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("get_api_key_permissions failed. error: {}", e.what());
-    }
-    return {};
+    return detail::run(detail::get_api_key_permissions(base_url_, domain_));
 }
 
 FCMBalanceSummary CoinbaseRestClient::get_futures_balance_summary() const {
-    try {
-        auto res = Http::get(std::format("{}/api/v3/brokerage/cfm/balance_summary", base_url_), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/cfm/balance_summary", domain_).c_str())}
-        });
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            return j["balance_summary"].get<FCMBalanceSummary>();
-        }
-        LOG_ERROR("get_futures_balance_summary failed. error: {}", res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("get_futures_balance_summary failed. error: {}", e.what());
-    }
-    return {};
+    return detail::run(detail::get_futures_balance_summary(base_url_, domain_));
 }
 
 std::vector<FCMPosition> CoinbaseRestClient::list_futures_positions() const {
-    try {
-        auto res = Http::get(std::format("{}/api/v3/brokerage/cfm/positions", base_url_), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/cfm/positions", domain_).c_str())}
-        });
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            return j["positions"];
-        }
-        LOG_ERROR("list_futures_positions failed. error: {}", res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("list_futures_positions failed. error: {}", e.what());
-    }
-    return {};
+    return detail::run(detail::list_futures_positions(base_url_, domain_));
 }
 
 FCMPosition CoinbaseRestClient::get_futures_position(std::string_view product_id) const {
-    try {
-        auto res = Http::get(std::format("{}/api/v3/brokerage/cfm/positions/{}", base_url_, product_id), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/cfm/positions/{}", domain_, product_id).c_str())}
-        });
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            return j["position"].get<FCMPosition>();
-        }
-        LOG_ERROR("get_futures_position failed. product_id: {}, error: {}", product_id, res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("get_futures_position failed. product_id: {}, error: {}", product_id, e.what());
-    }
-    return {};
+    return detail::run(detail::get_futures_position(base_url_, domain_, product_id));
 }
 
 bool CoinbaseRestClient::schedule_futures_sweep(double usd_amount) const {
-    try {
-        json body {
-            {"usd_amount", std::to_string(usd_amount)},
-        };
-        auto res = Http::post(std::format("{}/api/v3/brokerage/cfm/sweeps/schedule", base_url_), body.dump(), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("POST {}/api/v3/brokerage/cfm/sweeps/schedule", domain_).c_str())},
-            {"Content-Type", "application/json"}
-        });
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            return j.value("success", false);
-        }
-        LOG_ERROR("schedule_futures_sweep failed. error: {}", res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("schedule_futures_sweep failed. error: {}", e.what());
-    }
-    return false;
+    return detail::run(detail::schedule_futures_sweep(base_url_, domain_, usd_amount));
 }
 
 std::vector<FCMSweep> CoinbaseRestClient::list_futures_sweeps() const {
-    try {
-        auto res = Http::get(std::format("{}/api/v3/brokerage/cfm/sweeps", base_url_), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/cfm/sweeps", domain_).c_str())}
-        });
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            return j["sweeps"];
-        }
-        LOG_ERROR("list_futures_sweeps failed. error: {}", res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("list_futures_sweeps failed. error: {}", e.what());
-    }
-    return {};
+    return detail::run(detail::list_futures_sweeps(base_url_, domain_));
 }
 
 bool CoinbaseRestClient::cancel_pending_futures_sweep() const {
-    try {
-        auto res = Http::del(std::format("{}/api/v3/brokerage/cfm/sweeps", base_url_), "", {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("DELETE {}/api/v3/brokerage/cfm/sweeps", domain_).c_str())}
-        });
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            return j.value("success", false);
-        }
-        LOG_ERROR("cancel_pending_futures_sweep failed. error: {}", res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("cancel_pending_futures_sweep failed. error: {}", e.what());
-    }
-    return false;
+    return detail::run(detail::cancel_pending_futures_sweep(base_url_, domain_));
 }
 
 std::string CoinbaseRestClient::get_intraday_margin_setting() const {
-    try {
-        auto res = Http::get(std::format("{}/api/v3/brokerage/cfm/intraday/margin_setting", base_url_), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/cfm/intraday/margin_setting", domain_).c_str())}
-        });
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            return j.value("setting", std::string{});
-        }
-        LOG_ERROR("get_intraday_margin_setting failed. error: {}", res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("get_intraday_margin_setting failed. error: {}", e.what());
-    }
-    return {};
+    return detail::run(detail::get_intraday_margin_setting(base_url_, domain_));
 }
 
 CurrentMarginWindow CoinbaseRestClient::get_current_margin_window(std::string_view margin_profile_type) const {
-    try {
-        auto query = std::format("?margin_profile_type={}", margin_profile_type);
-        auto res = Http::get(std::format("{}/api/v3/brokerage/cfm/intraday/current_margin_window{}", base_url_, query), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/cfm/intraday/current_margin_window", domain_).c_str())}
-        });
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            return j.get<CurrentMarginWindow>();
-        }
-        LOG_ERROR("get_current_margin_window failed. error: {}", res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("get_current_margin_window failed. error: {}", e.what());
-    }
-    return {};
+    return detail::run(detail::get_current_margin_window(base_url_, domain_, margin_profile_type));
 }
 
 bool CoinbaseRestClient::set_intraday_margin_setting(std::string_view setting) const {
-    try {
-        json body {
-            {"setting", setting},
-        };
-        auto res = Http::post(std::format("{}/api/v3/brokerage/cfm/intraday/margin_setting", base_url_), body.dump(), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("POST {}/api/v3/brokerage/cfm/intraday/margin_setting", domain_).c_str())},
-            {"Content-Type", "application/json"}
-        });
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            return j.value("success", false);
-        }
-        LOG_ERROR("set_intraday_margin_setting failed. error: {}", res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("set_intraday_margin_setting failed. error: {}", e.what());
-    }
-    return false;
+    return detail::run(detail::set_intraday_margin_setting(base_url_, domain_, setting));
 }
 
 bool CoinbaseRestClient::allocate_portfolio(std::string_view portfolio_uuid, std::string_view symbol, double amount, std::string_view currency) const {
-    try {
-        json body {
-            {"portfolio_uuid", portfolio_uuid},
-            {"symbol", symbol},
-            {"amount", std::to_string(amount)},
-            {"currency", currency},
-        };
-        auto res = Http::post(std::format("{}/api/v3/brokerage/intx/allocate", base_url_), body.dump(), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("POST {}/api/v3/brokerage/intx/allocate", domain_).c_str())},
-            {"Content-Type", "application/json"}
-        });
-        if (res.is_ok()) {
-            return true;
-        }
-        LOG_ERROR("allocate_portfolio failed. error: {}", res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("allocate_portfolio failed. error: {}", e.what());
-    }
-    return false;
+    return detail::run(detail::allocate_portfolio(base_url_, domain_, portfolio_uuid, symbol, amount, currency));
 }
 
 PerpsPortfolioSummaryResponse CoinbaseRestClient::get_perps_portfolio_summary(std::string_view portfolio_uuid) const {
-    try {
-        auto res = Http::get(std::format("{}/api/v3/brokerage/intx/portfolio/{}", base_url_, portfolio_uuid), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/intx/portfolio/{}", domain_, portfolio_uuid).c_str())}
-        });
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            return j.get<PerpsPortfolioSummaryResponse>();
-        }
-        LOG_ERROR("get_perps_portfolio_summary failed. portfolio_uuid: {}, error: {}", portfolio_uuid, res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("get_perps_portfolio_summary failed. portfolio_uuid: {}, error: {}", portfolio_uuid, e.what());
-    }
-    return {};
+    return detail::run(detail::get_perps_portfolio_summary(base_url_, domain_, portfolio_uuid));
 }
 
 PerpsPositionsResponse CoinbaseRestClient::list_perps_positions(std::string_view portfolio_uuid) const {
-    try {
-        auto res = Http::get(std::format("{}/api/v3/brokerage/intx/positions/{}", base_url_, portfolio_uuid), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/intx/positions/{}", domain_, portfolio_uuid).c_str())}
-        });
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            return j.get<PerpsPositionsResponse>();
-        }
-        LOG_ERROR("list_perps_positions failed. portfolio_uuid: {}, error: {}", portfolio_uuid, res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("list_perps_positions failed. portfolio_uuid: {}, error: {}", portfolio_uuid, e.what());
-    }
-    return {};
+    return detail::run(detail::list_perps_positions(base_url_, domain_, portfolio_uuid));
 }
 
 PerpsPosition CoinbaseRestClient::get_perps_position(std::string_view portfolio_uuid, std::string_view symbol) const {
-    try {
-        auto res = Http::get(std::format("{}/api/v3/brokerage/intx/positions/{}/{}", base_url_, portfolio_uuid, symbol), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/intx/positions/{}/{}", domain_, portfolio_uuid, symbol).c_str())}
-        });
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            return j["position"].get<PerpsPosition>();
-        }
-        LOG_ERROR("get_perps_position failed. portfolio_uuid: {}, symbol: {}, error: {}", portfolio_uuid, symbol, res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("get_perps_position failed. portfolio_uuid: {}, symbol: {}, error: {}", portfolio_uuid, symbol, e.what());
-    }
-    return {};
+    return detail::run(detail::get_perps_position(base_url_, domain_, portfolio_uuid, symbol));
 }
 
 std::vector<PerpsPortfolioBalance> CoinbaseRestClient::get_perps_portfolio_balances(std::string_view portfolio_uuid) const {
-    try {
-        auto res = Http::get(std::format("{}/api/v3/brokerage/intx/balances/{}", base_url_, portfolio_uuid), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("GET {}/api/v3/brokerage/intx/balances/{}", domain_, portfolio_uuid).c_str())}
-        });
-        if (res.is_ok()) {
-            auto j = json::parse(res.result_text);
-            return j["portfolio_balances"];
-        }
-        LOG_ERROR("get_perps_portfolio_balances failed. portfolio_uuid: {}, error: {}", portfolio_uuid, res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("get_perps_portfolio_balances failed. portfolio_uuid: {}, error: {}", portfolio_uuid, e.what());
-    }
-    return {};
+    return detail::run(detail::get_perps_portfolio_balances(base_url_, domain_, portfolio_uuid));
 }
 
 bool CoinbaseRestClient::opt_in_or_out_multi_asset_collateral(std::string_view portfolio_uuid, bool enabled) const {
-    try {
-        json body {
-            {"portfolio_uuid", portfolio_uuid},
-            {"multi_asset_collateral_enabled", enabled},
-        };
-        auto res = Http::post(std::format("{}/api/v3/brokerage/intx/multi_asset_collateral", base_url_), body.dump(), {
-            {"Authorization", "Bearer " + coinbase::generate_coinbase_jwt(std::format("POST {}/api/v3/brokerage/intx/multi_asset_collateral", domain_).c_str())},
-            {"Content-Type", "application/json"}
-        });
-        if (res.is_ok()) {
-            return true;
-        }
-        LOG_ERROR("opt_in_or_out_multi_asset_collateral failed. error: {}", res.result_text);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("opt_in_or_out_multi_asset_collateral failed. error: {}", e.what());
-    }
-    return false;
+    return detail::run(detail::opt_in_or_out_multi_asset_collateral(base_url_, domain_, portfolio_uuid, enabled));
 }
 
 }   // end namespace coinbase

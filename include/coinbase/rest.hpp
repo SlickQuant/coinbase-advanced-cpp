@@ -137,6 +137,10 @@ public:
     bool opt_in_or_out_multi_asset_collateral(std::string_view portfolio_uuid, bool enabled) const;
 
     static const Product& product(std::string_view product_id);
+
+    // Primes the shared product cache that product() reads. Called by every client constructor;
+    // the first call performs one blocking request, later calls are free.
+    static void initialize_products(std::string_view base_url);
 private:
     std::string base_url_;
     std::string domain_;
