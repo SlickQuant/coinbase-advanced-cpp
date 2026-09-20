@@ -456,6 +456,7 @@ namespace coinbase::tests {
         uint32_t md_connected_count = 0;
         uint32_t md_disconnected_count = 0;
         uint32_t l2_update_count = 0;
+        uint32_t md_error_count = 0;
         WebSocketClient* last_client = nullptr;
 
         void onMarketDataConnected(WebSocketClient* client) override {
@@ -487,7 +488,10 @@ namespace coinbase::tests {
                                 const std::vector<PerpetualFuturePosition>&,
                                 const std::vector<ExpiringFuturePosition>&) override {}
         void onOrderUpdates(WebSocketClient*, uint64_t, const std::vector<Order>&) override {}
-        void onMarketDataError(WebSocketClient*, std::string&&) override {}
+        void onMarketDataError(WebSocketClient* client, std::string&&) override {
+            ++md_error_count;
+            last_client = client;
+        }
         void onUserDataError(WebSocketClient*, std::string&&) override {}
     };
 
@@ -770,6 +774,23 @@ namespace coinbase::tests {
         publishRecord(mux, producer_id, buf.data(), static_cast<uint32_t>(buf.size()));
     }
 
+    // Publishes a record shorter than a control header, leaving `filler` in the ring bytes
+    // just past it - the stale bytes a truncated record's header would be read out of.
+    // prepare() reserves more than is committed, so those bytes are ours to set.
+    static void publishTruncatedCtrlRecord(slick::stream_buffer_multiplexer &mux, uint32_t producer_id,
+                                           uint64_t client_id, uint32_t size, char filler) {
+        ASSERT_LT(size, MESSAGE_HEADER_SIZE);
+        auto pb = mux.get_producer_buffer(producer_id);
+        ASSERT_NE(pb, nullptr);
+        constexpr std::size_t scratch_size = 64;
+        auto [ptr, n] = pb->prepare(scratch_size);
+        ASSERT_EQ(n, scratch_size);
+        memset(ptr, filler, scratch_size);
+        memcpy(ptr, &client_id, sizeof(client_id));
+        pb->commit(size);       // only `size` bytes of the scratch region are published
+        pb->consume(size);
+    }
+
     static std::string l2UpdateMessage(uint64_t sequence_num) {
         return std::string(R"({"channel":"l2_data","timestamp":"2026-03-05T09:05:32.483569449Z","sequence_num":)")
             + std::to_string(sequence_num)
@@ -828,6 +849,32 @@ namespace coinbase::tests {
         callbacks.processData(100);
 
         EXPECT_EQ(callbacks.l2_update_count, 1u);
+    }
+
+    // A control record is only as trustworthy as the multiplexer it arrives on: on a shared
+    // or external mux anything can publish to a producer id, and processData() read the
+    // client id and the type tag out of a record without checking it was long enough to hold
+    // them. A record short of MESSAGE_HEADER_SIZE then made the error payload length
+    // (record.length - MESSAGE_HEADER_SIZE) underflow into a ~4 GB std::string.
+    TEST(UserThreadWebsocketCallbacksUnitTests, ProcessDataSkipsTruncatedCtrlRecord) {
+        ConcreteUserThreadCallbacks callbacks;
+        slick::stream_buffer_multiplexer mux(1024);
+        auto client = makeExternalMuxClient(callbacks, mux, 0);
+        constexpr char kErrorTag = static_cast<char>(MessageType::MARKET_ERROR);
+
+        // The error branches only run for a connected client, so connect it first.
+        publishCtrlRecord(mux, ProducerType::MD_CTRL, client->clientId(), MessageType::MARKET_CONNECTED);
+        // A live client id but no room for the type tag: the byte the tag would be read from
+        // holds MARKET_ERROR, so the length below it underflowed.
+        publishTruncatedCtrlRecord(mux, ProducerType::MD_CTRL, client->clientId(),
+                                   sizeof(uint64_t), kErrorTag);
+        // Shorter still - even the client id would be read from past the record.
+        publishTruncatedCtrlRecord(mux, ProducerType::MD_CTRL, client->clientId(),
+                                   sizeof(uint32_t), kErrorTag);
+
+        EXPECT_NO_THROW(callbacks.processData(100));
+        EXPECT_EQ(callbacks.md_connected_count, 1u);
+        EXPECT_EQ(callbacks.md_error_count, 0u);
     }
 
     // processData() must skip records whose producer_id is beyond the range that

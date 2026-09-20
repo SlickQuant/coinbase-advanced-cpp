@@ -261,6 +261,14 @@ void UserThreadWebsocketCallbacks::processData(uint32_t max_drain_count) {
         switch (prod_type) {
             case ProducerType::MD_CTRL:
             case ProducerType::USER_CTRL: {
+                // Anything can publish to a producer id on a shared or external multiplexer,
+                // so a record too short to hold the header is not one dispatchData() wrote.
+                // Reading the client id and the type tag out of it would run past the record,
+                // and the error payload length below (record.length - MESSAGE_HEADER_SIZE)
+                // would underflow into a ~4 GB std::string.
+                if (record.length < MESSAGE_HEADER_SIZE) {
+                    continue;
+                }
                 uint64_t client_id = 0;
                 memcpy(&client_id, record.data, sizeof(client_id));
                 auto client_it = live_clients_.find(client_id);

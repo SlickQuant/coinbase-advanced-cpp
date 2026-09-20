@@ -360,6 +360,11 @@ unique ID that is never recycled — so a record from a destroyed client is neve
 mistaken for one from a new client the allocator happens to place at the same
 address.
 
+`processData()` validates a record before it acts on it: one from an unregistered
+producer ID, or a control record too short to hold the client ID and type tag it must
+carry, is skipped rather than trusted. A shared — and especially a shared-memory —
+multiplexer can carry records this consumer did not write.
+
 This bookkeeping is not synchronized: **destroy a `WebSocketClient` on the thread
 that calls `processData()`, or stop calling `processData()` first.**
 
