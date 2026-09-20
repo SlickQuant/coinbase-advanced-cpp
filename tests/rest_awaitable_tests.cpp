@@ -16,6 +16,7 @@
 #include <slick/net/logging.hpp>
 
 #include <coinbase/rest_awaitable.hpp>
+#include "test_credentials.hpp"
 
 namespace asio = boost::asio;
 using namespace coinbase;
@@ -141,6 +142,8 @@ TEST_F(CoinbaseAwaitableTest, GetServerTimeTest) {
 // ============================================================================
 
 TEST_F(CoinbaseAwaitableTest, ListAccountsTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto accounts = run_async([this]() -> asio::awaitable<std::vector<Account>> {
         co_return co_await client_.list_accounts();
     });
@@ -156,6 +159,8 @@ TEST_F(CoinbaseAwaitableTest, ListAccountsTest) {
 }
 
 TEST_F(CoinbaseAwaitableTest, GetAccountTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto accounts = run_async([this]() -> asio::awaitable<std::vector<Account>> {
         co_return co_await client_.list_accounts();
     });
@@ -203,6 +208,8 @@ TEST_F(CoinbaseAwaitableTest, GetPublicProductTest) {
 }
 
 TEST_F(CoinbaseAwaitableTest, ListProductsTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto products = run_async([this]() -> asio::awaitable<std::vector<Product>> {
         co_return co_await client_.list_products();
     });
@@ -212,6 +219,8 @@ TEST_F(CoinbaseAwaitableTest, ListProductsTest) {
 }
 
 TEST_F(CoinbaseAwaitableTest, GetProductTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto product = run_async([this]() -> asio::awaitable<Product> {
         co_return co_await client_.get_product("BTC-USD");
     });
@@ -244,6 +253,8 @@ TEST_F(CoinbaseAwaitableTest, ListProductsWithFilterTest) {
 // ============================================================================
 
 TEST_F(CoinbaseAwaitableTest, ListOrdersTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto orders = run_async([this]() -> asio::awaitable<std::vector<Order>> {
         co_return co_await client_.list_orders();
     });
@@ -259,6 +270,8 @@ TEST_F(CoinbaseAwaitableTest, ListOrdersTest) {
 }
 
 TEST_F(CoinbaseAwaitableTest, ListOrdersWithFilterTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     OrderQueryParams params;
     params.order_status = {OrderStatus::OPEN};
     params.product_ids = {"BTC-USD"};
@@ -280,6 +293,8 @@ TEST_F(CoinbaseAwaitableTest, ListOrdersWithFilterTest) {
 // ============================================================================
 
 TEST_F(CoinbaseAwaitableTest, ListFillsTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto fills = run_async([this]() -> asio::awaitable<std::vector<Fill>> {
         co_return co_await client_.list_fills();
     });
@@ -296,6 +311,8 @@ TEST_F(CoinbaseAwaitableTest, ListFillsTest) {
 }
 
 TEST_F(CoinbaseAwaitableTest, ListFillsWithFilterTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     FillQueryParams params;
     params.product_ids = {"BTC-USD"};
 
@@ -315,6 +332,8 @@ TEST_F(CoinbaseAwaitableTest, ListFillsWithFilterTest) {
 // ============================================================================
 
 TEST_F(CoinbaseAwaitableTest, GetBestBidAskTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     std::vector<std::string> product_ids = {"BTC-USD", "ETH-USD"};
 
     auto price_books = run_async([this, &product_ids]() -> asio::awaitable<std::vector<PriceBook>> {
@@ -331,6 +350,8 @@ TEST_F(CoinbaseAwaitableTest, GetBestBidAskTest) {
 }
 
 TEST_F(CoinbaseAwaitableTest, GetProductBookTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     PriceBookQueryParams params;
     params.product_id = "BTC-USD";
     params.limit = 10;
@@ -351,6 +372,8 @@ TEST_F(CoinbaseAwaitableTest, GetProductBookTest) {
 }
 
 TEST_F(CoinbaseAwaitableTest, GetMarketTradesTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     MarketTradesQueryParams params;
     params.limit = 10;
 
@@ -370,6 +393,8 @@ TEST_F(CoinbaseAwaitableTest, GetMarketTradesTest) {
 }
 
 TEST_F(CoinbaseAwaitableTest, GetProductCandlesTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     ProductCandlesQueryParams params;
     params.granularity = Granularity::ONE_HOUR;
     auto now = std::chrono::system_clock::now();
@@ -407,6 +432,8 @@ TEST_F(CoinbaseAwaitableTest, GetNonExistentProductTest) {
 }
 
 TEST_F(CoinbaseAwaitableTest, GetNonExistentAccountTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto account = run_async([this]() -> asio::awaitable<Account> {
         co_return co_await client_.get_account("00000000-0000-0000-0000-000000000000");
     });
@@ -425,6 +452,8 @@ TEST_F(CoinbaseAwaitableTest, GetNonExistentAccountTest) {
 // at compile time; their live invocation is left to manual/sandbox verification.
 
 TEST_F(CoinbaseAwaitableTest, ListPortfoliosTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto portfolios = run_async([this]() -> asio::awaitable<std::vector<Portfolio>> {
         co_return co_await client_.list_portfolios();
     });
@@ -434,6 +463,8 @@ TEST_F(CoinbaseAwaitableTest, ListPortfoliosTest) {
 }
 
 TEST_F(CoinbaseAwaitableTest, GetPortfolioBreakdownTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto portfolios = run_async([this]() -> asio::awaitable<std::vector<Portfolio>> {
         co_return co_await client_.list_portfolios();
     });
@@ -448,6 +479,8 @@ TEST_F(CoinbaseAwaitableTest, GetPortfolioBreakdownTest) {
 }
 
 TEST_F(CoinbaseAwaitableTest, CreateEditDeletePortfolioTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto name = "cpp-sdk-test-" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
 
     auto portfolio = run_async([this, &name]() -> asio::awaitable<Portfolio> {
@@ -478,6 +511,8 @@ TEST_F(CoinbaseAwaitableTest, CreateEditDeletePortfolioTest) {
 }
 
 TEST_F(CoinbaseAwaitableTest, CreateConvertQuoteTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto accounts = run_async([this]() -> asio::awaitable<std::vector<Account>> {
         co_return co_await client_.list_accounts();
     });
@@ -512,6 +547,8 @@ TEST_F(CoinbaseAwaitableTest, CreateConvertQuoteTest) {
 }
 
 TEST_F(CoinbaseAwaitableTest, ListPaymentMethodsGetPaymentMethodTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto methods = run_async([this]() -> asio::awaitable<std::vector<PaymentMethod>> {
         co_return co_await client_.list_payment_methods();
     });
@@ -527,6 +564,8 @@ TEST_F(CoinbaseAwaitableTest, ListPaymentMethodsGetPaymentMethodTest) {
 }
 
 TEST_F(CoinbaseAwaitableTest, GetApiKeyPermissionsTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto permissions = run_async([this]() -> asio::awaitable<ApiKeyPermissions> {
         co_return co_await client_.get_api_key_permissions();
     });
@@ -535,6 +574,8 @@ TEST_F(CoinbaseAwaitableTest, GetApiKeyPermissionsTest) {
 }
 
 TEST_F(CoinbaseAwaitableTest, GetFuturesBalanceSummaryTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto summary = run_async([this]() -> asio::awaitable<FCMBalanceSummary> {
         co_return co_await client_.get_futures_balance_summary();
     });
@@ -543,6 +584,8 @@ TEST_F(CoinbaseAwaitableTest, GetFuturesBalanceSummaryTest) {
 }
 
 TEST_F(CoinbaseAwaitableTest, ListFuturesPositionsTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto positions = run_async([this]() -> asio::awaitable<std::vector<FCMPosition>> {
         co_return co_await client_.list_futures_positions();
     });
@@ -551,6 +594,8 @@ TEST_F(CoinbaseAwaitableTest, ListFuturesPositionsTest) {
 }
 
 TEST_F(CoinbaseAwaitableTest, ListFuturesSweepsTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto sweeps = run_async([this]() -> asio::awaitable<std::vector<FCMSweep>> {
         co_return co_await client_.list_futures_sweeps();
     });
@@ -559,6 +604,8 @@ TEST_F(CoinbaseAwaitableTest, ListFuturesSweepsTest) {
 }
 
 TEST_F(CoinbaseAwaitableTest, GetIntradayMarginSettingTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto setting = run_async([this]() -> asio::awaitable<std::string> {
         co_return co_await client_.get_intraday_margin_setting();
     });
@@ -568,6 +615,8 @@ TEST_F(CoinbaseAwaitableTest, GetIntradayMarginSettingTest) {
 }
 
 TEST_F(CoinbaseAwaitableTest, GetCurrentMarginWindowTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     // Margin window contents depend on the account's CFM trading configuration;
     // assert no crash + a valid request rather than requiring populated fields.
     auto window = run_async([this]() -> asio::awaitable<CurrentMarginWindow> {
@@ -578,6 +627,8 @@ TEST_F(CoinbaseAwaitableTest, GetCurrentMarginWindowTest) {
 }
 
 TEST_F(CoinbaseAwaitableTest, GetPerpsPortfolioSummaryTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto portfolios = run_async([this]() -> asio::awaitable<std::vector<Portfolio>> {
         co_return co_await client_.list_portfolios(PortfolioType::INTX);
     });
@@ -591,6 +642,8 @@ TEST_F(CoinbaseAwaitableTest, GetPerpsPortfolioSummaryTest) {
 }
 
 TEST_F(CoinbaseAwaitableTest, ListPerpsPositionsTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto portfolios = run_async([this]() -> asio::awaitable<std::vector<Portfolio>> {
         co_return co_await client_.list_portfolios(PortfolioType::INTX);
     });
@@ -604,6 +657,8 @@ TEST_F(CoinbaseAwaitableTest, ListPerpsPositionsTest) {
 }
 
 TEST_F(CoinbaseAwaitableTest, GetPerpsPortfolioBalancesTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto portfolios = run_async([this]() -> asio::awaitable<std::vector<Portfolio>> {
         co_return co_await client_.list_portfolios(PortfolioType::INTX);
     });
@@ -621,6 +676,8 @@ TEST_F(CoinbaseAwaitableTest, GetPerpsPortfolioBalancesTest) {
 // ============================================================================
 
 TEST_F(CoinbaseAwaitableTest, ConcurrentOperationsTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     run_async([this]() -> asio::awaitable<void> {
         // Launch multiple concurrent operations by directly awaiting without storing
         // Note: These will execute sequentially, not truly concurrently, but demonstrate

@@ -10,6 +10,7 @@
 #include <slick/net/logging.hpp>
 
 #include <coinbase/rest.hpp>
+#include "test_credentials.hpp"
 
 namespace coinbase::tests {
 
@@ -64,6 +65,8 @@ TEST_F(CoinbaseAdvancedTest, GetServerTimeTest) {
 }
 
 TEST_F(CoinbaseAdvancedTest, ListAccountsGetAccountTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto accounts = client_.list_accounts();
     EXPECT_FALSE(accounts.empty());
 
@@ -87,6 +90,8 @@ TEST_F(CoinbaseAdvancedTest, ListPublicProductsGetPublicProductTest) {
 
 
 TEST_F(CoinbaseAdvancedTest, ListProductsGetProductTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto products = client_.list_products();
     EXPECT_FALSE(products.empty());
 
@@ -98,6 +103,8 @@ TEST_F(CoinbaseAdvancedTest, ListProductsGetProductTest) {
 }
 
 TEST_F(CoinbaseAdvancedTest, GetBestBidAsk) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto pricebooks = client_.get_best_bid_ask({"BTC-USD", "ETH-USD"});
     EXPECT_EQ(pricebooks.size(), 2);
     EXPECT_TRUE(pricebooks[0].product_id == "BTC-USD" || pricebooks[0].product_id == "ETH-USD");
@@ -117,6 +124,8 @@ TEST_F(CoinbaseAdvancedTest, GetBestBidAsk) {
 }
 
 TEST_F(CoinbaseAdvancedTest, GetPriceBook) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     PriceBookQueryParams params;
     params.product_id = "BTC-USD";
     auto pb_response = client_.get_product_book(params);
@@ -126,6 +135,8 @@ TEST_F(CoinbaseAdvancedTest, GetPriceBook) {
 }
 
 TEST_F(CoinbaseAdvancedTest, GetMarketTrades) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto market_trades = client_.get_market_trades("BTC-USD", {10});
     EXPECT_EQ(market_trades.trades.size(), 10);
     EXPECT_GT(market_trades.best_bid, 0);
@@ -134,6 +145,8 @@ TEST_F(CoinbaseAdvancedTest, GetMarketTrades) {
 }
 
 TEST_F(CoinbaseAdvancedTest, GetProductCandles) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     ProductCandlesQueryParams params;
     params.start = to_milliseconds("2025-10-01T00:00:00Z") / 1000;
     params.end = to_milliseconds("2025-10-31T11:59:59Z") / 1000;
@@ -144,6 +157,8 @@ TEST_F(CoinbaseAdvancedTest, GetProductCandles) {
 }
 
 TEST_F(CoinbaseAdvancedTest, LimitOrderTests) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto pricebook = client_.get_best_bid_ask({"BTC-USD"});
     if (!pricebook.empty()) {
         auto rsp = client_.create_order(
@@ -210,6 +225,8 @@ TEST_F(CoinbaseAdvancedTest, LimitOrderTests) {
 }
 
 TEST_F(CoinbaseAdvancedTest, LimitBracketOrderTests) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     {
         auto pricebook = client_.get_best_bid_ask({"BTC-USD"});
         if (!pricebook.empty()) {
@@ -312,6 +329,8 @@ TEST_F(CoinbaseAdvancedTest, LimitBracketOrderTests) {
 }
 
 TEST_F(CoinbaseAdvancedTest, BracketOrderTests) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     {
         auto pricebook = client_.get_best_bid_ask({"BTC-USD"});
         if (!pricebook.empty()) {
@@ -489,6 +508,8 @@ TEST_F(CoinbaseAdvancedTest, BracketOrderTests) {
 }
 
 TEST_F(CoinbaseAdvancedTest, ListOrdersGetOrderTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto orders = client_.list_orders();
     EXPECT_FALSE(orders.empty());
 
@@ -505,6 +526,8 @@ TEST_F(CoinbaseAdvancedTest, ListOrdersGetOrderTest) {
 }
 
 TEST_F(CoinbaseAdvancedTest, ListFillsTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto fills = client_.list_fills();
     EXPECT_FALSE(fills.empty());
     
@@ -521,11 +544,15 @@ TEST_F(CoinbaseAdvancedTest, ListFillsTest) {
 }
 
 TEST_F(CoinbaseAdvancedTest, TakerFeeRateTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto fee_rate = client_.get_taker_fee_rate();
     EXPECT_NE(fee_rate, 0.0);
 }
 
 TEST_F(CoinbaseAdvancedTest, MakerFeeRateTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto fee_rate = client_.get_maker_fee_rate();
     EXPECT_NE(fee_rate, 0.0);
 }
@@ -537,11 +564,15 @@ TEST_F(CoinbaseAdvancedTest, MakerFeeRateTest) {
 // their live invocation is left to manual/sandbox verification.
 
 TEST_F(CoinbaseAdvancedTest, ListPortfoliosTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto portfolios = client_.list_portfolios();
     EXPECT_FALSE(portfolios.empty());
 }
 
 TEST_F(CoinbaseAdvancedTest, GetPortfolioBreakdownTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto portfolios = client_.list_portfolios();
     EXPECT_FALSE(portfolios.empty());
 
@@ -552,6 +583,8 @@ TEST_F(CoinbaseAdvancedTest, GetPortfolioBreakdownTest) {
 }
 
 TEST_F(CoinbaseAdvancedTest, CreateEditDeletePortfolioTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto name = "cpp-sdk-test-" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
     auto portfolio = client_.create_portfolio(name);
     EXPECT_FALSE(portfolio.uuid.empty());
@@ -574,6 +607,8 @@ TEST_F(CoinbaseAdvancedTest, CreateEditDeletePortfolioTest) {
 }
 
 TEST_F(CoinbaseAdvancedTest, CreateConvertQuoteTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto accounts = client_.list_accounts();
     EXPECT_GE(accounts.size(), 2u);
 
@@ -602,6 +637,8 @@ TEST_F(CoinbaseAdvancedTest, CreateConvertQuoteTest) {
 }
 
 TEST_F(CoinbaseAdvancedTest, ListPaymentMethodsGetPaymentMethodTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto methods = client_.list_payment_methods();
     if (!methods.empty()) {
         auto method = client_.get_payment_method(methods[0].id);
@@ -610,31 +647,43 @@ TEST_F(CoinbaseAdvancedTest, ListPaymentMethodsGetPaymentMethodTest) {
 }
 
 TEST_F(CoinbaseAdvancedTest, GetApiKeyPermissionsTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto permissions = client_.get_api_key_permissions();
     EXPECT_FALSE(permissions.portfolio_uuid.empty());
 }
 
 TEST_F(CoinbaseAdvancedTest, GetFuturesBalanceSummaryTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto summary = client_.get_futures_balance_summary();
     EXPECT_FALSE(summary.futures_buying_power.currency.empty());
 }
 
 TEST_F(CoinbaseAdvancedTest, ListFuturesPositionsTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto positions = client_.list_futures_positions();
     (void)positions;
 }
 
 TEST_F(CoinbaseAdvancedTest, ListFuturesSweepsTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto sweeps = client_.list_futures_sweeps();
     (void)sweeps;
 }
 
 TEST_F(CoinbaseAdvancedTest, GetIntradayMarginSettingTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto setting = client_.get_intraday_margin_setting();
     EXPECT_FALSE(setting.empty());
 }
 
 TEST_F(CoinbaseAdvancedTest, GetCurrentMarginWindowTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     // Margin window contents depend on the account's CFM trading configuration;
     // assert no crash + a valid request rather than requiring populated fields.
     auto window = client_.get_current_margin_window("MARGIN_PROFILE_TYPE_RETAIL_REGULAR");
@@ -642,6 +691,8 @@ TEST_F(CoinbaseAdvancedTest, GetCurrentMarginWindowTest) {
 }
 
 TEST_F(CoinbaseAdvancedTest, GetPerpsPortfolioSummaryTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto portfolios = client_.list_portfolios(PortfolioType::INTX);
     if (!portfolios.empty()) {
         auto summary = client_.get_perps_portfolio_summary(portfolios[0].uuid);
@@ -650,6 +701,8 @@ TEST_F(CoinbaseAdvancedTest, GetPerpsPortfolioSummaryTest) {
 }
 
 TEST_F(CoinbaseAdvancedTest, ListPerpsPositionsTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto portfolios = client_.list_portfolios(PortfolioType::INTX);
     if (!portfolios.empty()) {
         auto positions = client_.list_perps_positions(portfolios[0].uuid);
@@ -658,6 +711,8 @@ TEST_F(CoinbaseAdvancedTest, ListPerpsPositionsTest) {
 }
 
 TEST_F(CoinbaseAdvancedTest, GetPerpsPortfolioBalancesTest) {
+    SKIP_WITHOUT_API_CREDENTIALS();
+
     auto portfolios = client_.list_portfolios(PortfolioType::INTX);
     if (!portfolios.empty()) {
         auto balances = client_.get_perps_portfolio_balances(portfolios[0].uuid);

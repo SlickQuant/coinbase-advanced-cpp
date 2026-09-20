@@ -554,14 +554,26 @@ All examples require no API credentials for public market-data channels (TICKER,
 
 ## Testing
 
-The SDK includes comprehensive unit tests using Google Test. To run tests:
+The suite is built with Google Test and runs against the live Coinbase Advanced API — only
+the `*UnitTests`, `QueryParamsTests` and `TimestampParsingTests` suites are offline.
 
 ```bash
-cd build
-cmake -DBUILD_COINBASE_ADVANCED_TESTS=ON ..
-cmake --build .
-cd tests
-./coinbase_advance_tests
+cmake -S . -B build -DBUILD_COINBASE_ADVANCED_TESTS=ON
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+Every test that reaches an authenticated endpoint needs `COINBASE_API_KEY` and
+`COINBASE_API_SECRET` in the environment. Without them it reports itself as **skipped**
+rather than failing, so a clone with no credentials still runs the offline suites and the
+public-endpoint tests (server time, public products, market-data WebSocket channels).
+
+A few tests act on the real account: `LimitOrderTests`, `LimitBracketOrderTests` and
+`BracketOrderTests` place and cancel real orders, and `CreateEditDeletePortfolioTest`
+creates and deletes a real portfolio. Exclude them unless you mean to:
+
+```bash
+ctest --test-dir build -E "(Order|CreateEditDeletePortfolio)" --output-on-failure
 ```
 
 ## License

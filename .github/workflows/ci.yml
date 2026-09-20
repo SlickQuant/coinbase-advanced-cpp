@@ -85,5 +85,10 @@ jobs:
       - name: Build
         run: cmake --build build --config ${{ matrix.build_type }} -j 4
 
+      # Tests that reach an authenticated endpoint skip themselves when COINBASE_API_KEY
+      # and COINBASE_API_SECRET are unset (see tests/test_credentials.hpp), so this filter
+      # is not what keeps CI green - do not grow it for a new authenticated test. It keeps
+      # the run fast, and keeps the order-placing and account-mutating tests out of it if
+      # credentials are ever added to this workflow.
       - name: Test
         run: ctest --test-dir build -C ${{ matrix.build_type }} -E "(Order|Fill|Portfolio|Account|Permissions|Balance|Margin|ListProducts|UserChannel|DataLogger|GetBestBidAsk|GetPriceBook|GetMarketTrades|GetProductCandles|CreateConvertQuote|ConcurrentOperations|GetProduct)" --output-on-failure

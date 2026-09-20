@@ -7,6 +7,7 @@
 #include <slick/logger.hpp>
 #include <slick/net/logging.hpp>
 #include <coinbase/websocket.hpp>
+#include "test_credentials.hpp"
 
 namespace coinbase::tests {
     template<typename CallbacksType>
@@ -242,6 +243,8 @@ namespace coinbase::tests {
     using UserThreadWebSocketTests = WebSocketT<UserThreadWebsocketCallbacks>;
 
     TEST_F(WebSocketTests, UserChannel) {
+        SKIP_WITHOUT_API_CREDENTIALS();
+
         client_->subscribe({"BTC-USD"}, {WebSocketChannel::USER});
         while (!snapshot_received_.load(std::memory_order_relaxed)) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -300,6 +303,8 @@ namespace coinbase::tests {
     }
 
     TEST_F(UserThreadWebSocketTests, UserChannel) {
+        SKIP_WITHOUT_API_CREDENTIALS();
+
         client_->subscribe({"BTC-USD"}, {WebSocketChannel::USER});
         while (!snapshot_received_.load(std::memory_order_relaxed)) {
             processData();
@@ -368,6 +373,8 @@ namespace coinbase::tests {
     }
 
     TEST_F(WebSocketTests, DataLogger) {
+        SKIP_WITHOUT_API_CREDENTIALS();
+
         std::remove("coinbase.log");
         EXPECT_FALSE(std::filesystem::exists("coinbase.log"));
 
@@ -389,6 +396,8 @@ namespace coinbase::tests {
     }
 
     TEST_F(UserThreadWebSocketTests, DataLogger) {
+        SKIP_WITHOUT_API_CREDENTIALS();
+
         std::remove("coinbase.log");
         EXPECT_FALSE(std::filesystem::exists("coinbase.log"));
 
