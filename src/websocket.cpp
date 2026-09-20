@@ -8,29 +8,13 @@ namespace coinbase {
 
 namespace {
 
-// The producer ids a client owns: one CTRL and one DATA id per configured url.
-struct ProducerIds {
-    void add(uint32_t id) noexcept { ids_[count_++] = id; }
-    const uint32_t* begin() const noexcept { return ids_.data(); }
-    const uint32_t* end() const noexcept { return ids_.data() + count_; }
-    bool empty() const noexcept { return count_ == 0; }
-
-    std::array<uint32_t, ProducerType::_PRODUCER_TYPE_COUNT_> ids_{};
-    uint32_t count_ = 0;
-};
-
-ProducerIds ownedProducerIds(uint32_t producer_offset, bool has_market_data, bool has_user_data) noexcept {
-    ProducerIds ids;
-    if (has_user_data) {
-        ids.add(producer_offset + ProducerType::USER_CTRL);
-        ids.add(producer_offset + ProducerType::USER_DATA);
-    }
-    if (has_market_data) {
-        ids.add(producer_offset + ProducerType::MD_CTRL);
-        ids.add(producer_offset + ProducerType::MD_DATA);
-    }
-    return ids;
-}
+// The producer ids a client owns: the whole range its producer_offset names,
+// [producer_offset, producer_offset + PRODUCER_IDS_PER_CLIENT). Ownership deliberately
+// does not depend on which urls the client was given - claiming only the ids of the
+// configured urls would let an md-only and a user-only client sit at the same
+// producer_offset, a range the documented contract and isProducerOffsetAvailable() both
+// hand to a single client.
+constexpr uint32_t PRODUCER_IDS_PER_CLIENT = ProducerType::_PRODUCER_TYPE_COUNT_;
 
 // Producer ids claimed by a WebSocketClient, keyed by multiplexer.
 //
@@ -94,51 +78,58 @@ bool reclaimIfReleased(slick::stream_buffer_multiplexer& mux,
 
 enum class ClaimResult : uint8_t { ok, owned_by_live_client, session_still_writing };
 
-// Claims every id or none of them. Ids parked by a destroyed client are reclaimed here
-// once their session has let go, which is what lets "destroy, then re-create at the same
-// producer_offset" work without anyone waiting. On failure `conflict` receives the id.
-ClaimResult claimProducerIds(slick::stream_buffer_multiplexer& mux, const ProducerIds& ids, uint32_t& conflict) {
-    if (ids.empty()) {
-        return ClaimResult::ok;
-    }
-    ClaimsGuard guard;
-    auto it = g_producer_claims.find(&mux);
-    if (it == g_producer_claims.end()) {
-        it = g_producer_claims.emplace(&mux, std::unordered_map<uint32_t, ClaimState>{}).first;
-    }
-    else {
-        for (auto id : ids) {
-            auto claim = it->second.find(id);
-            if (claim == it->second.end()) {
-                continue;
-            }
-            if (!reclaimIfReleased(mux, it->second, claim)) {
-                conflict = id;
-                return claim->second == ClaimState::owned ? ClaimResult::owned_by_live_client
-                                                          : ClaimResult::session_still_writing;
-            }
+// Walks the ids a client at `producer_offset` owns, reclaiming the ones a destroyed client
+// left parked, and reports the first one still in use through `conflict`. Caller holds the
+// lock. Both claimProducerIds() and isProducerOffsetAvailable() decide through this, so
+// "is this offset free?" and "may I have this offset?" can never answer differently.
+ClaimResult scanOwnedProducerIds(slick::stream_buffer_multiplexer& mux,
+                                 std::unordered_map<uint32_t, ClaimState>& claims,
+                                 uint32_t producer_offset,
+                                 uint32_t& conflict) {
+    auto result = ClaimResult::ok;
+    for (uint32_t i = 0; i < PRODUCER_IDS_PER_CLIENT; ++i) {
+        auto claim = claims.find(producer_offset + i);
+        if (claim == claims.end() || reclaimIfReleased(mux, claims, claim)) {
+            continue;   // never claimed, or parked and now free
+        }
+        if (result == ClaimResult::ok) {    // first conflict wins; the loop runs on so
+                                            // the rest of the range is still reclaimed
+            conflict = claim->first;
+            result = claim->second == ClaimState::owned ? ClaimResult::owned_by_live_client
+                                                        : ClaimResult::session_still_writing;
         }
     }
-    for (auto id : ids) {
-        it->second[id] = ClaimState::owned;
+    return result;
+}
+
+// Claims every id in the range or none of them. Ids parked by a destroyed client are
+// reclaimed here once their session has let go, which is what lets "destroy, then
+// re-create at the same producer_offset" work without anyone waiting. On failure
+// `conflict` receives the id.
+ClaimResult claimProducerIds(slick::stream_buffer_multiplexer& mux, uint32_t producer_offset, uint32_t& conflict) {
+    ClaimsGuard guard;
+    auto &claims = g_producer_claims[&mux];
+    const auto result = scanOwnedProducerIds(mux, claims, producer_offset, conflict);
+    if (result != ClaimResult::ok) {
+        return result;      // a conflict leaves a claim behind, so the entry is not empty
     }
-    return ClaimResult::ok;
+    for (uint32_t i = 0; i < PRODUCER_IDS_PER_CLIENT; ++i) {
+        claims[producer_offset + i] = ClaimState::owned;
+    }
+    return result;
 }
 
 // Never waits: ids whose buffer is already free are released, the rest are parked for a
 // later claim to reclaim. Destroying a client must not block a trading thread on a socket
 // teardown that runs on slick-net's service thread.
-void releaseProducerIds(slick::stream_buffer_multiplexer& mux, const ProducerIds& ids) {
-    if (ids.empty()) {
-        return;
-    }
+void releaseProducerIds(slick::stream_buffer_multiplexer& mux, uint32_t producer_offset) {
     ClaimsGuard guard;
     auto it = g_producer_claims.find(&mux);
     if (it == g_producer_claims.end()) {
         return;
     }
-    for (auto id : ids) {
-        auto claim = it->second.find(id);
+    for (uint32_t i = 0; i < PRODUCER_IDS_PER_CLIENT; ++i) {
+        auto claim = it->second.find(producer_offset + i);
         if (claim == it->second.end()) {
             continue;
         }
@@ -441,7 +432,7 @@ WebSocketClient::~WebSocketClient() {
     // Hand the producer ids back so a client created later with the same producer_offset can
     // reuse the producers this one leaves registered in the mux. Ids whose session is still
     // closing are parked rather than waited on - see releaseProducerIds().
-    releaseProducerIds(mux_, ownedProducerIds(producer_offset_, !market_data_url_.empty(), !user_data_url_.empty()));
+    releaseProducerIds(mux_, producer_offset_);
 }
 
 bool WebSocketClient::isProducerOffsetAvailable(slick::stream_buffer_multiplexer& mux, uint32_t producer_offset) noexcept {
@@ -450,13 +441,8 @@ bool WebSocketClient::isProducerOffsetAvailable(slick::stream_buffer_multiplexer
     if (it == g_producer_claims.end()) {
         return true;
     }
-    bool available = true;
-    for (uint32_t i = 0; i < ProducerType::_PRODUCER_TYPE_COUNT_; ++i) {
-        auto claim = it->second.find(producer_offset + i);
-        if (claim != it->second.end() && !reclaimIfReleased(mux, it->second, claim)) {
-            available = false;
-        }
-    }
+    uint32_t conflict = 0;
+    const bool available = scanOwnedProducerIds(mux, it->second, producer_offset, conflict) == ClaimResult::ok;
     if (it->second.empty()) {
         g_producer_claims.erase(it);
     }
@@ -500,9 +486,8 @@ void WebSocketClient::init(
 
     // Claim before registering anything: a producer left behind by a destroyed client is
     // reusable, one a live client still owns is a producer_offset collision.
-    const auto owned_ids = ownedProducerIds(producer_offset_, !market_data_url_.empty(), !user_data_url_.empty());
     uint32_t conflict = 0;
-    switch (claimProducerIds(mux_, owned_ids, conflict)) {
+    switch (claimProducerIds(mux_, producer_offset_, conflict)) {
     case ClaimResult::owned_by_live_client:     // a bug in the caller: overlapping offsets
         throw std::invalid_argument("producer_id " + std::to_string(conflict) +
             " is owned by a live WebSocketClient. Give each client sharing a multiplexer its own producer_offset.");
@@ -527,7 +512,7 @@ void WebSocketClient::init(
             delete data_handler_;
         }
         data_handler_ = nullptr;
-        releaseProducerIds(mux_, owned_ids);
+        releaseProducerIds(mux_, producer_offset_);
         throw;
     }
 }

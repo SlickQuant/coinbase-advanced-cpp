@@ -543,11 +543,13 @@ namespace coinbase::tests {
         slick::stream_buffer_multiplexer &mux,
         uint32_t producer_offset,
         uint32_t buffer_size = 1u << 16,
-        uint32_t record_size = 256
+        uint32_t record_size = 256,
+        std::string_view md_url = "ws://127.0.0.1:1/md",
+        std::string_view user_url = "ws://127.0.0.1:1/user"
     ) {
         return std::make_unique<WebSocketClient>(
             &callbacks, mux,
-            "ws://127.0.0.1:1/md", "ws://127.0.0.1:1/user",
+            md_url, user_url,
             producer_offset,
             buffer_size, record_size, nullptr,
             buffer_size, record_size, nullptr,
@@ -698,6 +700,33 @@ namespace coinbase::tests {
 
         client.reset();
         EXPECT_TRUE(WebSocketClient::isProducerOffsetAvailable(mux, kOffset));
+    }
+
+    // A client owns its whole producer id range whichever urls it was given. While
+    // ownership was claimed per configured url, an md-only and a user-only client could
+    // both be constructed at one offset, each holding half of a range that
+    // isProducerOffsetAvailable() - and the documented contract - give to one client.
+    TEST(WebSocketClientUnitTests, ClientOwnsWholeOffsetRangeWithOneUrlConfigured) {
+        ConcreteUserThreadCallbacks callbacks;
+        slick::stream_buffer_multiplexer mux(1024);
+        constexpr uint32_t kOffset = 0;
+        constexpr uint32_t kBufferSize = 1u << 16;
+        constexpr uint32_t kRecordSize = 256;
+
+        auto md_only = makeExternalMuxClient(callbacks, mux, kOffset, kBufferSize, kRecordSize,
+                                             "ws://127.0.0.1:1/md", "");
+        EXPECT_FALSE(WebSocketClient::isProducerOffsetAvailable(mux, kOffset));
+
+        // The offset reads as unavailable, so the constructor must refuse it too instead
+        // of quietly taking the half of the range the md-only client left unregistered.
+        EXPECT_THROW(makeExternalMuxClient(callbacks, mux, kOffset, kBufferSize, kRecordSize,
+                                           "", "ws://127.0.0.1:1/user"),
+                     std::invalid_argument);
+
+        md_only.reset();
+        EXPECT_TRUE(WebSocketClient::isProducerOffsetAvailable(mux, kOffset));
+        EXPECT_NO_THROW(makeExternalMuxClient(callbacks, mux, kOffset, kBufferSize, kRecordSize,
+                                              "", "ws://127.0.0.1:1/user"));
     }
 
     // Client ids are never recycled, so a control record left behind by a destroyed

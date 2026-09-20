@@ -182,8 +182,9 @@ public:
         uint32_t write_buffer_size = 1u << 20               // 1 MB write buffer
     );
 
-    // Shares an external multiplexer. Each client owns the producer ids in
-    // [producer_offset, producer_offset + _PRODUCER_TYPE_COUNT_). Producers left
+    // Shares an external multiplexer. Each client owns the whole producer id range
+    // [producer_offset, producer_offset + _PRODUCER_TYPE_COUNT_), whether or not both urls
+    // are configured - a market-data-only client owns the user-data ids too. Producers left
     // registered by a destroyed client are reused as-is, keeping the capacity and record
     // size they were created with. Throws std::invalid_argument when the range overlaps a
     // client that is still alive (a caller bug), and std::runtime_error while the previous
@@ -237,9 +238,11 @@ public:
     }
 
     // Non-blocking check that a client can be constructed at `producer_offset` on `mux`:
-    // false while a live client owns those producer ids, and while the websocket session
-    // of a destroyed client can still be writing to their buffers. Poll this instead of
-    // catching the constructor's std::runtime_error when re-creating a client.
+    // false while a live client owns any of those producer ids, and while the websocket
+    // session of a destroyed client can still be writing to their buffers. It covers
+    // exactly the ids the constructor claims, so true means construction is not refused.
+    // Poll this instead of catching the constructor's std::runtime_error when re-creating
+    // a client.
     static bool isProducerOffsetAvailable(slick::stream_buffer_multiplexer& mux, uint32_t producer_offset) noexcept;
 
     // Process-wide unique id of this client. Never reused, not even by a client

@@ -317,6 +317,10 @@ at a `producer_offset` that overlaps a live client throws `std::invalid_argument
 rather than silently interleaving two WebSockets into one buffer. Closing a client
 with `stop()` is not enough — ownership is released by the destructor.
 
+A client owns its whole ID range whichever URLs it was given — the market-data-only
+clients above own IDs 0–3 and 4–7 including the user-data IDs they never register —
+so `isProducerOffsetAvailable()` and the constructor always agree about an offset.
+
 Ownership outlives the client object itself when a session is still shutting down.
 `detach()` and `close()` only *start* an asynchronous teardown, and slick-net's read
 loop keeps shared ownership of the producer buffer until its session actually ends —
