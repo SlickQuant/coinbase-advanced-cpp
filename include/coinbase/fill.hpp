@@ -78,7 +78,7 @@ struct FillQueryParams {
     std::optional<std::vector<std::string>> trade_ids;
     std::optional<std::vector<std::string>> product_ids;
     std::optional<std::string> start_sequence_timestamp;
-    std::optional<std::string> end_sequeence_timestamp;
+    std::optional<std::string> end_sequence_timestamp;
     std::optional<uint32_t> limit;
     std::optional<std::string> cursor;
     std::optional<std::vector<std::string>> asset_filters;
@@ -106,8 +106,8 @@ struct FillQueryParams {
         if (start_sequence_timestamp.has_value()) {
             params.emplace_back(std::format("start_sequence_timestamp={}", start_sequence_timestamp.value()));
         }
-        if (end_sequeence_timestamp.has_value()) {
-            params.emplace_back(std::format("end_sequeence_timestamp={}", end_sequeence_timestamp.value()));
+        if (end_sequence_timestamp.has_value()) {
+            params.emplace_back(std::format("end_sequence_timestamp={}", end_sequence_timestamp.value()));
         }
         if (limit.has_value()) {
             params.emplace_back(std::format("limit={}", limit.value()));
