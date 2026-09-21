@@ -39,59 +39,59 @@ void CoinbaseAwaitableRestClient::set_base_url(std::string_view url) {
 }
 
 asio::awaitable<uint64_t> CoinbaseAwaitableRestClient::get_server_time() const {
-    co_return co_await detail::run_async(detail::get_server_time(base_url_));
+    return detail::run_async(detail::get_server_time(base_url_));
 }
 
 asio::awaitable<std::vector<Account>> CoinbaseAwaitableRestClient::list_accounts(const AccountQueryParams &params) const {
-    co_return co_await detail::run_async(detail::list_accounts(base_url_, domain_, params));
+    return detail::run_async(detail::list_accounts(base_url_, domain_, params));
 }
 
 asio::awaitable<Account> CoinbaseAwaitableRestClient::get_account(std::string_view account_uuid) const {
-    co_return co_await detail::run_async(detail::get_account(base_url_, domain_, account_uuid));
+    return detail::run_async(detail::get_account(base_url_, domain_, account_uuid));
 }
 
 asio::awaitable<std::vector<Product>> CoinbaseAwaitableRestClient::list_products(const ProductQueryParams &params) const {
-    co_return co_await detail::run_async(detail::list_products(base_url_, domain_, params));
+    return detail::run_async(detail::list_products(base_url_, domain_, params));
 }
 
 asio::awaitable<Product> CoinbaseAwaitableRestClient::get_product(std::string_view product_id, bool get_tradability_status) const {
-    co_return co_await detail::run_async(detail::get_product(base_url_, domain_, product_id, get_tradability_status));
+    return detail::run_async(detail::get_product(base_url_, domain_, product_id, get_tradability_status));
 }
 
 asio::awaitable<std::vector<Product>> CoinbaseAwaitableRestClient::list_public_products(const ProductQueryParams &params) const {
-    co_return co_await detail::run_async(detail::list_public_products(base_url_, params));
+    return detail::run_async(detail::list_public_products(base_url_, params));
 }
 
 asio::awaitable<Product> CoinbaseAwaitableRestClient::get_public_product(std::string_view product_id) const {
-    co_return co_await detail::run_async(detail::get_public_product(base_url_, product_id));
+    return detail::run_async(detail::get_public_product(base_url_, product_id));
 }
 
 asio::awaitable<std::vector<Order>> CoinbaseAwaitableRestClient::list_orders(const OrderQueryParams &query) const {
-    co_return co_await detail::run_async(detail::list_orders(base_url_, domain_, query));
+    return detail::run_async(detail::list_orders(base_url_, domain_, query));
 }
 
 asio::awaitable<Order> CoinbaseAwaitableRestClient::get_order(std::string_view order_id) const {
-    co_return co_await detail::run_async(detail::get_order(base_url_, domain_, order_id));
+    return detail::run_async(detail::get_order(base_url_, domain_, order_id));
 }
 
 asio::awaitable<std::vector<Fill>> CoinbaseAwaitableRestClient::list_fills(const FillQueryParams &params) const {
-    co_return co_await detail::run_async(detail::list_fills(base_url_, domain_, params));
+    return detail::run_async(detail::list_fills(base_url_, domain_, params));
 }
 
 asio::awaitable<std::vector<PriceBook>> CoinbaseAwaitableRestClient::get_best_bid_ask(const std::vector<std::string> &product_ids) const {
-    co_return co_await detail::run_async(detail::get_best_bid_ask(base_url_, domain_, product_ids));
+    return detail::run_async(detail::get_best_bid_ask(base_url_, domain_, product_ids));
 }
 
 asio::awaitable<PriceBookResponse> CoinbaseAwaitableRestClient::get_product_book(const PriceBookQueryParams &params) const {
-    co_return co_await detail::run_async(detail::get_product_book(base_url_, domain_, params));
+    return detail::run_async(detail::get_product_book(base_url_, domain_, params));
 }
 
 asio::awaitable<MarketTrades> CoinbaseAwaitableRestClient::get_market_trades(std::string_view product_id, const MarketTradesQueryParams &params) const {
-    co_return co_await detail::run_async(detail::get_market_trades(base_url_, domain_, product_id, params));
+    return detail::run_async(detail::get_market_trades(base_url_, domain_, product_id, params));
 }
 
 asio::awaitable<std::vector<Candle>> CoinbaseAwaitableRestClient::get_product_candles(std::string_view product_id, const ProductCandlesQueryParams &params) const {
-    co_return co_await detail::run_async(detail::get_product_candles(base_url_, domain_, product_id, params));
+    return detail::run_async(detail::get_product_candles(base_url_, domain_, product_id, params));
 }
 
 asio::awaitable<CreateOrderResponse> CoinbaseAwaitableRestClient::create_order(
@@ -114,21 +114,11 @@ asio::awaitable<CreateOrderResponse> CoinbaseAwaitableRestClient::create_order(
     std::optional<json> &&attached_order_configuration,
     std::optional<PredictionMetadata> &&prediction_metadata
 ) const {
-    auto order = detail::make_create_order(base_url_, domain_,
+    return detail::run_async(detail::make_create_order(base_url_, domain_,
         std::move(client_order_id), std::move(product_id), side, order_type, time_in_force, size,
         price, post_only, size_in_quote, stop_price, take_profit_price, end_time, twap_start_time,
         std::move(sor_preference), std::move(leverage), std::move(margin_type),
-        std::move(attached_order_configuration), std::move(prediction_metadata));
-    if (order.req.url.empty()) {
-        co_return std::move(order.rejected);
-    }
-    try {
-        auto res = co_await detail::send_async(order.req);
-        co_return detail::parse_create_order(res, order.client_order_id);
-    }
-    catch (const std::exception &e) {
-        co_return detail::create_order_failure(order.client_order_id, e.what());
-    }
+        std::move(attached_order_configuration), std::move(prediction_metadata)));
 }
 
 asio::awaitable<ModifyOrderResponse> CoinbaseAwaitableRestClient::modify_order(
@@ -140,138 +130,121 @@ asio::awaitable<ModifyOrderResponse> CoinbaseAwaitableRestClient::modify_order(
     std::optional<double> take_profit_price,
     std::optional<bool> cancel_attached_order
 ) const {
-    ModifyOrderResponse rsp;
-    try {
-        auto req = detail::make_modify_order(base_url_, domain_, order_id, product_id, price, size,
-                                             stop_price, take_profit_price, cancel_attached_order);
-        auto res = co_await detail::send_async(req);
-        co_return detail::parse_modify_order(res, order_id);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("modify_order failed. order_id: {}, error: {}", order_id, e.what());
-    }
-    rsp.success = false;
-    co_return rsp;
+    return detail::run_async(detail::make_modify_order(base_url_, domain_, std::move(order_id),
+                                                       product_id, price, size, stop_price,
+                                                       take_profit_price, cancel_attached_order));
 }
 
 asio::awaitable<std::vector<CancelOrderResponse>> CoinbaseAwaitableRestClient::cancel_orders(const std::vector<std::string_view> &order_ids) const {
-    try {
-        auto req = detail::make_cancel_orders(base_url_, domain_, order_ids);
-        auto res = co_await detail::send_async(req);
-        co_return detail::parse_cancel_orders(res, order_ids);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("cancel_orders failed. error: {}", e.what());
-    }
-    co_return detail::cancel_orders_failure(order_ids);
+    return detail::run_async(detail::make_cancel_orders(base_url_, domain_, order_ids));
 }
 
 asio::awaitable<std::vector<Portfolio>> CoinbaseAwaitableRestClient::list_portfolios(std::optional<PortfolioType> portfolio_type) const {
-    co_return co_await detail::run_async(detail::list_portfolios(base_url_, domain_, portfolio_type));
+    return detail::run_async(detail::list_portfolios(base_url_, domain_, portfolio_type));
 }
 
 asio::awaitable<Portfolio> CoinbaseAwaitableRestClient::create_portfolio(std::string_view name) const {
-    co_return co_await detail::run_async(detail::create_portfolio(base_url_, domain_, name));
+    return detail::run_async(detail::create_portfolio(base_url_, domain_, name));
 }
 
 asio::awaitable<PortfolioBreakdown> CoinbaseAwaitableRestClient::get_portfolio_breakdown(std::string_view portfolio_uuid, std::optional<std::string_view> currency) const {
-    co_return co_await detail::run_async(detail::get_portfolio_breakdown(base_url_, domain_, portfolio_uuid, currency));
+    return detail::run_async(detail::get_portfolio_breakdown(base_url_, domain_, portfolio_uuid, currency));
 }
 
 asio::awaitable<MovePortfolioFundsResult> CoinbaseAwaitableRestClient::move_portfolio_funds(double value, std::string_view currency, std::string_view source_portfolio_uuid, std::string_view target_portfolio_uuid) const {
-    co_return co_await detail::run_async(detail::move_portfolio_funds(base_url_, domain_, value, currency, source_portfolio_uuid, target_portfolio_uuid));
+    return detail::run_async(detail::move_portfolio_funds(base_url_, domain_, value, currency, source_portfolio_uuid, target_portfolio_uuid));
 }
 
 asio::awaitable<Portfolio> CoinbaseAwaitableRestClient::edit_portfolio(std::string_view portfolio_uuid, std::string_view name) const {
-    co_return co_await detail::run_async(detail::edit_portfolio(base_url_, domain_, portfolio_uuid, name));
+    return detail::run_async(detail::edit_portfolio(base_url_, domain_, portfolio_uuid, name));
 }
 
 asio::awaitable<bool> CoinbaseAwaitableRestClient::delete_portfolio(std::string_view portfolio_uuid) const {
-    co_return co_await detail::run_async(detail::delete_portfolio(base_url_, domain_, portfolio_uuid));
+    return detail::run_async(detail::delete_portfolio(base_url_, domain_, portfolio_uuid));
 }
 
 asio::awaitable<ConvertTrade> CoinbaseAwaitableRestClient::create_convert_quote(std::string_view from_account, std::string_view to_account, double amount) const {
-    co_return co_await detail::run_async(detail::create_convert_quote(base_url_, domain_, from_account, to_account, amount));
+    return detail::run_async(detail::create_convert_quote(base_url_, domain_, from_account, to_account, amount));
 }
 
 asio::awaitable<ConvertTrade> CoinbaseAwaitableRestClient::get_convert_trade(std::string_view trade_id, std::string_view from_account, std::string_view to_account) const {
-    co_return co_await detail::run_async(detail::get_convert_trade(base_url_, domain_, trade_id, from_account, to_account));
+    return detail::run_async(detail::get_convert_trade(base_url_, domain_, trade_id, from_account, to_account));
 }
 
 asio::awaitable<ConvertTrade> CoinbaseAwaitableRestClient::commit_convert_trade(std::string_view trade_id, std::string_view from_account, std::string_view to_account) const {
-    co_return co_await detail::run_async(detail::commit_convert_trade(base_url_, domain_, trade_id, from_account, to_account));
+    return detail::run_async(detail::commit_convert_trade(base_url_, domain_, trade_id, from_account, to_account));
 }
 
 asio::awaitable<std::vector<PaymentMethod>> CoinbaseAwaitableRestClient::list_payment_methods() const {
-    co_return co_await detail::run_async(detail::list_payment_methods(base_url_, domain_));
+    return detail::run_async(detail::list_payment_methods(base_url_, domain_));
 }
 
 asio::awaitable<PaymentMethod> CoinbaseAwaitableRestClient::get_payment_method(std::string_view payment_method_id) const {
-    co_return co_await detail::run_async(detail::get_payment_method(base_url_, domain_, payment_method_id));
+    return detail::run_async(detail::get_payment_method(base_url_, domain_, payment_method_id));
 }
 
 asio::awaitable<ApiKeyPermissions> CoinbaseAwaitableRestClient::get_api_key_permissions() const {
-    co_return co_await detail::run_async(detail::get_api_key_permissions(base_url_, domain_));
+    return detail::run_async(detail::get_api_key_permissions(base_url_, domain_));
 }
 
 asio::awaitable<FCMBalanceSummary> CoinbaseAwaitableRestClient::get_futures_balance_summary() const {
-    co_return co_await detail::run_async(detail::get_futures_balance_summary(base_url_, domain_));
+    return detail::run_async(detail::get_futures_balance_summary(base_url_, domain_));
 }
 
 asio::awaitable<std::vector<FCMPosition>> CoinbaseAwaitableRestClient::list_futures_positions() const {
-    co_return co_await detail::run_async(detail::list_futures_positions(base_url_, domain_));
+    return detail::run_async(detail::list_futures_positions(base_url_, domain_));
 }
 
 asio::awaitable<FCMPosition> CoinbaseAwaitableRestClient::get_futures_position(std::string_view product_id) const {
-    co_return co_await detail::run_async(detail::get_futures_position(base_url_, domain_, product_id));
+    return detail::run_async(detail::get_futures_position(base_url_, domain_, product_id));
 }
 
 asio::awaitable<bool> CoinbaseAwaitableRestClient::schedule_futures_sweep(double usd_amount) const {
-    co_return co_await detail::run_async(detail::schedule_futures_sweep(base_url_, domain_, usd_amount));
+    return detail::run_async(detail::schedule_futures_sweep(base_url_, domain_, usd_amount));
 }
 
 asio::awaitable<std::vector<FCMSweep>> CoinbaseAwaitableRestClient::list_futures_sweeps() const {
-    co_return co_await detail::run_async(detail::list_futures_sweeps(base_url_, domain_));
+    return detail::run_async(detail::list_futures_sweeps(base_url_, domain_));
 }
 
 asio::awaitable<bool> CoinbaseAwaitableRestClient::cancel_pending_futures_sweep() const {
-    co_return co_await detail::run_async(detail::cancel_pending_futures_sweep(base_url_, domain_));
+    return detail::run_async(detail::cancel_pending_futures_sweep(base_url_, domain_));
 }
 
 asio::awaitable<std::string> CoinbaseAwaitableRestClient::get_intraday_margin_setting() const {
-    co_return co_await detail::run_async(detail::get_intraday_margin_setting(base_url_, domain_));
+    return detail::run_async(detail::get_intraday_margin_setting(base_url_, domain_));
 }
 
 asio::awaitable<CurrentMarginWindow> CoinbaseAwaitableRestClient::get_current_margin_window(std::string_view margin_profile_type) const {
-    co_return co_await detail::run_async(detail::get_current_margin_window(base_url_, domain_, margin_profile_type));
+    return detail::run_async(detail::get_current_margin_window(base_url_, domain_, margin_profile_type));
 }
 
 asio::awaitable<bool> CoinbaseAwaitableRestClient::set_intraday_margin_setting(std::string_view setting) const {
-    co_return co_await detail::run_async(detail::set_intraday_margin_setting(base_url_, domain_, setting));
+    return detail::run_async(detail::set_intraday_margin_setting(base_url_, domain_, setting));
 }
 
 asio::awaitable<bool> CoinbaseAwaitableRestClient::allocate_portfolio(std::string_view portfolio_uuid, std::string_view symbol, double amount, std::string_view currency) const {
-    co_return co_await detail::run_async(detail::allocate_portfolio(base_url_, domain_, portfolio_uuid, symbol, amount, currency));
+    return detail::run_async(detail::allocate_portfolio(base_url_, domain_, portfolio_uuid, symbol, amount, currency));
 }
 
 asio::awaitable<PerpsPortfolioSummaryResponse> CoinbaseAwaitableRestClient::get_perps_portfolio_summary(std::string_view portfolio_uuid) const {
-    co_return co_await detail::run_async(detail::get_perps_portfolio_summary(base_url_, domain_, portfolio_uuid));
+    return detail::run_async(detail::get_perps_portfolio_summary(base_url_, domain_, portfolio_uuid));
 }
 
 asio::awaitable<PerpsPositionsResponse> CoinbaseAwaitableRestClient::list_perps_positions(std::string_view portfolio_uuid) const {
-    co_return co_await detail::run_async(detail::list_perps_positions(base_url_, domain_, portfolio_uuid));
+    return detail::run_async(detail::list_perps_positions(base_url_, domain_, portfolio_uuid));
 }
 
 asio::awaitable<PerpsPosition> CoinbaseAwaitableRestClient::get_perps_position(std::string_view portfolio_uuid, std::string_view symbol) const {
-    co_return co_await detail::run_async(detail::get_perps_position(base_url_, domain_, portfolio_uuid, symbol));
+    return detail::run_async(detail::get_perps_position(base_url_, domain_, portfolio_uuid, symbol));
 }
 
 asio::awaitable<std::vector<PerpsPortfolioBalance>> CoinbaseAwaitableRestClient::get_perps_portfolio_balances(std::string_view portfolio_uuid) const {
-    co_return co_await detail::run_async(detail::get_perps_portfolio_balances(base_url_, domain_, portfolio_uuid));
+    return detail::run_async(detail::get_perps_portfolio_balances(base_url_, domain_, portfolio_uuid));
 }
 
 asio::awaitable<bool> CoinbaseAwaitableRestClient::opt_in_or_out_multi_asset_collateral(std::string_view portfolio_uuid, bool enabled) const {
-    co_return co_await detail::run_async(detail::opt_in_or_out_multi_asset_collateral(base_url_, domain_, portfolio_uuid, enabled));
+    return detail::run_async(detail::opt_in_or_out_multi_asset_collateral(base_url_, domain_, portfolio_uuid, enabled));
 }
 
 }   // end namespace coinbase

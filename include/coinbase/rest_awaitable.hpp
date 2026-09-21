@@ -33,6 +33,17 @@ namespace coinbase {
 
 // Every method below suspends on the awaiting coroutine's executor for the whole HTTP exchange, so
 // a slow request holds up neither the event loop nor the coroutines and timers sharing it.
+//
+// None of these methods is itself a coroutine: each signs and builds its request before returning,
+// so the awaitable it hands back owns everything the exchange needs. Arguments are therefore only
+// read during the call - views, temporaries and defaulted query objects need not outlive it, and
+// neither need the client - which makes it safe to hold an operation and start it later:
+//
+//     auto pending = client.get_account(std::string(uuid));   // uuid may die here
+//     asio::co_spawn(ctx, std::move(pending), asio::detached); // started much later
+//
+// Had the request been built inside a coroutine body, none of that would run until the first
+// resumption, by which point those arguments are gone.
 class CoinbaseAwaitableRestClient
 {
 public:

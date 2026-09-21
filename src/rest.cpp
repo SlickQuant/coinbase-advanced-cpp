@@ -130,21 +130,11 @@ CreateOrderResponse CoinbaseRestClient::create_order(
     std::optional<json> &&attached_order_configuration,
     std::optional<PredictionMetadata> &&prediction_metadata
 ) const {
-    auto order = detail::make_create_order(base_url_, domain_,
+    return detail::run(detail::make_create_order(base_url_, domain_,
         std::move(client_order_id), std::move(product_id), side, order_type, time_in_force, size,
         limit_price, post_only, size_in_quote, stop_price, take_profit_price, end_time, twap_start_time,
         std::move(sor_preference), std::move(leverage), std::move(margin_type),
-        std::move(attached_order_configuration), std::move(prediction_metadata));
-    if (order.req.url.empty()) {
-        return std::move(order.rejected);
-    }
-    try {
-        auto res = detail::send(order.req);
-        return detail::parse_create_order(res, order.client_order_id);
-    }
-    catch (const std::exception &e) {
-        return detail::create_order_failure(order.client_order_id, e.what());
-    }
+        std::move(attached_order_configuration), std::move(prediction_metadata)));
 }
 
 ModifyOrderResponse CoinbaseRestClient::modify_order(
@@ -156,30 +146,13 @@ ModifyOrderResponse CoinbaseRestClient::modify_order(
     std::optional<double> take_profit_price,
     std::optional<bool> cancel_attached_order
 ) const {
-    ModifyOrderResponse rsp;
-    try {
-        auto req = detail::make_modify_order(base_url_, domain_, order_id, product_id, price, size,
-                                             stop_price, take_profit_price, cancel_attached_order);
-        auto res = detail::send(req);
-        return detail::parse_modify_order(res, order_id);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("modify_order failed. order_id: {}, error: {}", order_id, e.what());
-    }
-    rsp.success = false;
-    return rsp;
+    return detail::run(detail::make_modify_order(base_url_, domain_, std::move(order_id), product_id,
+                                                 price, size, stop_price, take_profit_price,
+                                                 cancel_attached_order));
 }
 
 std::vector<CancelOrderResponse> CoinbaseRestClient::cancel_orders(const std::vector<std::string_view> &order_ids) const {
-    try {
-        auto req = detail::make_cancel_orders(base_url_, domain_, order_ids);
-        auto res = detail::send(req);
-        return detail::parse_cancel_orders(res, order_ids);
-    }
-    catch (const std::exception &e) {
-        LOG_ERROR("cancel_orders failed. error: {}", e.what());
-    }
-    return detail::cancel_orders_failure(order_ids);
+    return detail::run(detail::make_cancel_orders(base_url_, domain_, order_ids));
 }
 
 std::vector<Portfolio> CoinbaseRestClient::list_portfolios(std::optional<PortfolioType> portfolio_type) const {

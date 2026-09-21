@@ -30,7 +30,7 @@ inline endpoint<uint64_t> get_server_time(std::string_view base_url) {
 
 inline paged_endpoint<Account, AccountQueryParams> list_accounts(std::string_view base_url, std::string_view domain,
                                                                  const AccountQueryParams &params) {
-    return { base_url, domain, "/api/v3/brokerage/accounts", "accounts", "list_accounts", true, params };
+    return { std::string(base_url), std::string(domain), "/api/v3/brokerage/accounts", "accounts", "list_accounts", true, params };
 }
 
 inline endpoint<Account> get_account(std::string_view base_url, std::string_view domain, std::string_view account_uuid) {
@@ -87,7 +87,7 @@ inline endpoint<Product> get_public_product(std::string_view base_url, std::stri
 
 inline paged_endpoint<Order, OrderQueryParams> list_orders(std::string_view base_url, std::string_view domain,
                                                            const OrderQueryParams &query) {
-    return { base_url, domain, "/api/v3/brokerage/orders/historical/batch", "orders", "list_orders", true, query };
+    return { std::string(base_url), std::string(domain), "/api/v3/brokerage/orders/historical/batch", "orders", "list_orders", true, query };
 }
 
 inline endpoint<Order> get_order(std::string_view base_url, std::string_view domain, std::string_view order_id) {
@@ -102,7 +102,7 @@ inline endpoint<Order> get_order(std::string_view base_url, std::string_view dom
 inline paged_endpoint<Fill, FillQueryParams> list_fills(std::string_view base_url, std::string_view domain,
                                                         const FillQueryParams &params) {
     // The fills endpoint hands back a cursor without a has_next flag.
-    return { base_url, domain, "/api/v3/brokerage/orders/historical/fills", "fills", "list_fills", false, params };
+    return { std::string(base_url), std::string(domain), "/api/v3/brokerage/orders/historical/fills", "fills", "list_fills", false, params };
 }
 
 // ---------------------------------------------------------------------------
@@ -409,7 +409,9 @@ inline std::optional<json> make_create_order_body(
     return body;
 }
 
-// A create-order request, or - when req.url is empty - the rejection to hand straight back.
+// A create-order request, or - when req.url is empty - the rejection to hand straight back. It owns
+// the client_order_id the response is reported against, so the drivers below still have it once the
+// caller's arguments are gone.
 struct create_order_request {
     request req;
     std::string client_order_id;
@@ -492,44 +494,86 @@ inline CreateOrderResponse create_order_failure(std::string_view client_order_id
     return rsp;
 }
 
+inline CreateOrderResponse run(create_order_request order) {
+    if (order.req.url.empty()) {
+        return std::move(order.rejected);
+    }
+    try {
+        auto res = send(order.req);
+        return parse_create_order(res, order.client_order_id);
+    }
+    catch (const std::exception &e) {
+        return create_order_failure(order.client_order_id, e.what());
+    }
+}
+
+inline boost::asio::awaitable<CreateOrderResponse> run_async(create_order_request order) {
+    if (order.req.url.empty()) {
+        co_return std::move(order.rejected);
+    }
+    try {
+        auto res = co_await send_async(order.req);
+        co_return parse_create_order(res, order.client_order_id);
+    }
+    catch (const std::exception &e) {
+        co_return create_order_failure(order.client_order_id, e.what());
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Modify order
 // ---------------------------------------------------------------------------
 
-inline request make_modify_order(
+// A modify-order request paired with the order id the response is reported against, owned so the
+// drivers below still have it once the caller's arguments are gone. An empty req.url marks a
+// request the builder could not make - an unknown product, or a signature that failed.
+struct modify_order_request {
+    request req;
+    std::string order_id;
+};
+
+inline modify_order_request make_modify_order(
     std::string_view base_url,
     std::string_view domain,
-    const std::string &order_id,
-    const std::string &product_id,
+    std::string order_id,
+    std::string_view product_id,
     double price,
     double size,
     std::optional<double> stop_price,
     std::optional<double> take_profit_price,
     std::optional<bool> cancel_attached_order)
 {
-    auto &prod = CoinbaseRestClient::product(product_id);
-    json body {
-        {"order_id", order_id},
-        {"size", std::to_string(size)},
-    };
-    body["price"] = to_string(price, prod.quote_increment);
-    if (stop_price.has_value() && take_profit_price.has_value()) {
-        body["attached_order_configuration"] = {
-            {"trigger_bracket_gtc", {
-                {"limit_price", to_string(take_profit_price.value(), prod.quote_increment)},
-                {"stop_trigger_price", to_string(stop_price.value(), prod.quote_increment)},
-            }}
+    modify_order_request out;
+    out.order_id = std::move(order_id);
+    try {
+        auto &prod = CoinbaseRestClient::product(product_id);
+        json body {
+            {"order_id", out.order_id},
+            {"size", std::to_string(size)},
         };
-    }
-    else if (stop_price.has_value()) {
-        body["stop_price"] = to_string(stop_price.value(), prod.quote_increment);
-    }
-    if (cancel_attached_order.has_value()) {
-        body["cancel_attached_order"] = cancel_attached_order.value();
-    }
+        body["price"] = to_string(price, prod.quote_increment);
+        if (stop_price.has_value() && take_profit_price.has_value()) {
+            body["attached_order_configuration"] = {
+                {"trigger_bracket_gtc", {
+                    {"limit_price", to_string(take_profit_price.value(), prod.quote_increment)},
+                    {"stop_trigger_price", to_string(stop_price.value(), prod.quote_increment)},
+                }}
+            };
+        }
+        else if (stop_price.has_value()) {
+            body["stop_price"] = to_string(stop_price.value(), prod.quote_increment);
+        }
+        if (cancel_attached_order.has_value()) {
+            body["cancel_attached_order"] = cancel_attached_order.value();
+        }
 
-    LOG_TRACE("modify order: {}", body.dump());
-    return signed_request(http_method::post, base_url, domain, "/api/v3/brokerage/orders/edit", {}, body.dump());
+        LOG_TRACE("modify order: {}", body.dump());
+        out.req = signed_request(http_method::post, base_url, domain, "/api/v3/brokerage/orders/edit", {}, body.dump());
+    }
+    catch (const std::exception &e) {
+        LOG_ERROR("modify_order failed. order_id: {}, error: {}", out.order_id, e.what());
+    }
+    return out;
 }
 
 inline ModifyOrderResponse parse_modify_order(const Http::Response &res, std::string_view order_id) {
@@ -545,23 +589,57 @@ inline ModifyOrderResponse parse_modify_order(const Http::Response &res, std::st
     return rsp;
 }
 
+inline ModifyOrderResponse modify_order_failure() {
+    ModifyOrderResponse rsp;
+    rsp.success = false;
+    return rsp;
+}
+
+inline ModifyOrderResponse run(modify_order_request op) {
+    if (!op.req.url.empty()) {
+        try {
+            auto res = send(op.req);
+            return parse_modify_order(res, op.order_id);
+        }
+        catch (const std::exception &e) {
+            LOG_ERROR("modify_order failed. order_id: {}, error: {}", op.order_id, e.what());
+        }
+    }
+    return modify_order_failure();
+}
+
+inline boost::asio::awaitable<ModifyOrderResponse> run_async(modify_order_request op) {
+    if (!op.req.url.empty()) {
+        try {
+            auto res = co_await send_async(op.req);
+            co_return parse_modify_order(res, op.order_id);
+        }
+        catch (const std::exception &e) {
+            LOG_ERROR("modify_order failed. order_id: {}, error: {}", op.order_id, e.what());
+        }
+    }
+    co_return modify_order_failure();
+}
+
 // ---------------------------------------------------------------------------
 // Cancel orders
 // ---------------------------------------------------------------------------
 
-inline request make_cancel_orders(std::string_view base_url, std::string_view domain,
-                                  const std::vector<std::string_view> &order_ids) {
-    json body {
-        {"order_ids", order_ids},
-    };
-    LOG_TRACE("cancel order: {}", body.dump());
-    return signed_request(http_method::post, base_url, domain, "/api/v3/brokerage/orders/batch_cancel", {}, body.dump());
-}
+// A cancel-orders request together with the ids it covers. Both the failure fallback and the
+// parsed response are reported per id, long after the request went out, so the ids are copied out
+// of the caller's vector of views rather than borrowed from it.
+struct cancel_orders_request {
+    request req;
+    std::vector<std::string> order_ids;
+};
 
-inline std::vector<CancelOrderResponse> cancel_orders_failure(const std::vector<std::string_view> &order_ids) {
+// `Ids` is any range of string-like ids - the caller's std::string_view vector, or the owned copy
+// carried by cancel_orders_request.
+template <typename Ids>
+std::vector<CancelOrderResponse> cancel_orders_failure(const Ids &order_ids) {
     std::vector<CancelOrderResponse> rt;
     rt.reserve(order_ids.size());
-    for (auto oid : order_ids) {
+    for (const auto &oid : order_ids) {
         CancelOrderResponse rsp;
         rsp.success = false;
         rsp.failure_reason = "INVALID_CANCEL_REQUEST";
@@ -571,8 +649,8 @@ inline std::vector<CancelOrderResponse> cancel_orders_failure(const std::vector<
     return rt;
 }
 
-inline std::vector<CancelOrderResponse> parse_cancel_orders(const Http::Response &res,
-                                                            const std::vector<std::string_view> &order_ids) {
+template <typename Ids>
+std::vector<CancelOrderResponse> parse_cancel_orders(const Http::Response &res, const Ids &order_ids) {
     if (!res.result_text.empty()) {
         auto j = json::parse(res.result_text);
         LOG_TRACE(j.dump().c_str());
@@ -580,6 +658,52 @@ inline std::vector<CancelOrderResponse> parse_cancel_orders(const Http::Response
     }
     LOG_ERROR("cancel_orders failed. error: {}", res.result_text);
     return cancel_orders_failure(order_ids);
+}
+
+inline cancel_orders_request make_cancel_orders(std::string_view base_url, std::string_view domain,
+                                                const std::vector<std::string_view> &order_ids) {
+    cancel_orders_request out;
+    out.order_ids.reserve(order_ids.size());
+    for (auto oid : order_ids) {
+        out.order_ids.emplace_back(oid);
+    }
+    try {
+        json body {
+            {"order_ids", out.order_ids},
+        };
+        LOG_TRACE("cancel order: {}", body.dump());
+        out.req = signed_request(http_method::post, base_url, domain, "/api/v3/brokerage/orders/batch_cancel", {}, body.dump());
+    }
+    catch (const std::exception &e) {
+        LOG_ERROR("cancel_orders failed. error: {}", e.what());
+    }
+    return out;
+}
+
+inline std::vector<CancelOrderResponse> run(cancel_orders_request op) {
+    if (!op.req.url.empty()) {
+        try {
+            auto res = send(op.req);
+            return parse_cancel_orders(res, op.order_ids);
+        }
+        catch (const std::exception &e) {
+            LOG_ERROR("cancel_orders failed. error: {}", e.what());
+        }
+    }
+    return cancel_orders_failure(op.order_ids);
+}
+
+inline boost::asio::awaitable<std::vector<CancelOrderResponse>> run_async(cancel_orders_request op) {
+    if (!op.req.url.empty()) {
+        try {
+            auto res = co_await send_async(op.req);
+            co_return parse_cancel_orders(res, op.order_ids);
+        }
+        catch (const std::exception &e) {
+            LOG_ERROR("cancel_orders failed. error: {}", e.what());
+        }
+    }
+    co_return cancel_orders_failure(op.order_ids);
 }
 
 // ---------------------------------------------------------------------------

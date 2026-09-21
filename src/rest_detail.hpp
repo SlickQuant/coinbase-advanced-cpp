@@ -102,6 +102,15 @@ inline boost::asio::awaitable<Http::Response> send_async(request &req) {
 // ---------------------------------------------------------------------------
 // Drivers
 // ---------------------------------------------------------------------------
+//
+// Every driver takes its endpoint BY VALUE, and each run_async() overload is the only coroutine on
+// the path. A C++20 coroutine copies its arguments into the frame the moment it is called, but it
+// does not run a line of its body until it is first resumed, and an asio::awaitable is lazy - it is
+// resumed by the co_await, or by the io_context after a co_spawn, which can be long after the call
+// that produced it. Anything the body only reads once it starts must therefore be owned by the
+// frame, not borrowed from the caller. Taking the endpoint by value moves the fully built, owned
+// request in at call time, so the clients can build requests eagerly from borrowed string_views,
+// temporaries and default arguments, and hand back an awaitable that outlives all of them.
 
 // An endpoint whose successful response is one JSON document parsed into T. A failed request is
 // logged and yields `fallback`, matching how the clients have always reported REST errors.
@@ -120,12 +129,17 @@ struct status_endpoint {
 };
 
 // A cursor-paginated endpoint: pages are fetched until the server stops handing back a cursor.
+// Every page is signed from this snapshot, so the url and the domain are owned copies rather than
+// views into the client: a paginated awaitable keeps re-signing long after the call that built it,
+// by which point the client may have been moved, re-pointed with set_base_url() or destroyed.
+// `path` is always a string literal, and `Params` owns its strings, so the whole struct is
+// self-contained. See run_async() below.
 template <typename T, typename Params>
 struct paged_endpoint {
     using item_type = T;
 
-    std::string_view base_url;
-    std::string_view domain;
+    std::string base_url;
+    std::string domain;
     std::string_view path;
     const char *items_field = "";
     const char *op = "";
