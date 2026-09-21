@@ -90,5 +90,11 @@ jobs:
       # is not what keeps CI green - do not grow it for a new authenticated test. It keeps
       # the run fast, and keeps the order-placing and account-mutating tests out of it if
       # credentials are ever added to this workflow.
+      #
+      # Every alternative is anchored to a live-integration suite. ctest matches the regex
+      # anywhere in the test name, so an unanchored keyword list also swallowed the offline
+      # unit tests that merely spell one of these words - QueryParamsTests.Order*/Fill*,
+      # ProductCacheTests.*Order*, and WebSocketClientUnitTests.ProducerTypeEnumOrdering
+      # ("Order" inside "Ordering"). Those need no credentials and no network; they must run.
       - name: Test
-        run: ctest --test-dir build -C ${{ matrix.build_type }} -E "(Order|Fill|Portfolio|Account|Permissions|Balance|Margin|ListProducts|UserChannel|DataLogger|GetBestBidAsk|GetPriceBook|GetMarketTrades|GetProductCandles|CreateConvertQuote|ConcurrentOperations|GetProduct)" --output-on-failure
+        run: ctest --test-dir build -C ${{ matrix.build_type }} -E "^(CoinbaseAdvancedTest|CoinbaseAwaitableTest)\..*(Order|Fill|Portfolio|Account|Permissions|Balance|Margin|ListProducts|GetBestBidAsk|GetPriceBook|GetMarketTrades|GetProductCandles|CreateConvertQuote|ConcurrentOperations|GetProduct)|^(WebSocketTests|UserThreadWebSocketTests)\.(UserChannel|DataLogger)$" --output-on-failure
