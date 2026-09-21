@@ -317,6 +317,13 @@ at a `producer_offset` that overlaps a live client throws `std::invalid_argument
 rather than silently interleaving two WebSockets into one buffer. Closing a client
 with `stop()` is not enough — ownership is released by the destructor.
 
+Reuse is also limited to producers a `WebSocketClient` registered. A producer your
+own code (or any other library) registered on a shared multiplexer is left strictly
+alone: its owner registered it in order to write to it, and a producer buffer has a
+single-producer contract. Constructing a client whose ID range covers such a producer
+throws `std::invalid_argument`, and `isProducerOffsetAvailable()` reports the offset
+as unavailable — give the client a `producer_offset` whose whole range is its own.
+
 A client owns its whole ID range whichever URLs it was given — the market-data-only
 clients above own IDs 0–3 and 4–7 including the user-data IDs they never register —
 so `isProducerOffsetAvailable()` and the constructor always agree about an offset.
@@ -345,9 +352,10 @@ if (coinbase::WebSocketClient::isProducerOffsetAvailable(mux, offset)) {
 ```
 
 The two failure modes are deliberately different exception types: `std::invalid_argument`
-for an offset owned by a live client (a bug in the caller — retrying will not help) and
-`std::runtime_error` for a session that is still closing (transient — retry, or poll
-`isProducerOffsetAvailable()`).
+for an offset that is not the client's to take — owned by a live client, or holding a
+producer registered outside this library (both bugs in the caller — retrying will not
+help) — and `std::runtime_error` for a session that is still closing (transient — retry,
+or poll `isProducerOffsetAvailable()`).
 
 ###### Destroying a client that shares a multiplexer
 
@@ -390,6 +398,11 @@ while (running) {
     }
 }
 ```
+
+The reader registers that producer on a multiplexer of its own, which is what keeps it a
+reader: registering a producer on the multiplexer a `WebSocketClient` uses would claim an
+ID the client needs, and the client refuses such an ID rather than writing to a buffer it
+does not own.
 
 See `examples/multi_websockets_ws_callbacks.cpp` (producer) and `examples/multi_websockets_ws_callbacks_reader.cpp` (cross-process reader) for a complete two-symbol demo.
 

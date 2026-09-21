@@ -16,24 +16,42 @@ namespace {
 // hand to a single client.
 constexpr uint32_t PRODUCER_IDS_PER_CLIENT = ProducerType::_PRODUCER_TYPE_COUNT_;
 
+using ProducerBuffer = slick::stream_buffer_multiplexer::producer_buffer;
+
 // Producer ids claimed by a WebSocketClient, keyed by multiplexer.
 //
 // slick::stream_buffer_multiplexer never unregisters a producer, so "already registered"
-// alone cannot tell a producer left behind by a destroyed client (safe to reuse) from one
-// a live client is still writing to (a producer_offset collision, which would interleave
-// two clients into one buffer). This registry draws that line: an id stays claimed for
-// the lifetime of the client that registered it, and for as long afterwards as that
-// client's websocket session can still be writing to the buffer.
+// alone separates none of the three producers a client can find at its offset: one left
+// behind by a destroyed client (safe to reuse), one a live client is still writing to (a
+// producer_offset collision), and one registered by code outside this library (never ours
+// to write to - its owner is already relying on the single-producer contract of the stream
+// buffer behind it). This registry draws both lines. An id stays claimed for the lifetime
+// of the client that registered it, and for as long afterwards as that client's websocket
+// session can still be writing to the buffer; a claim also remembers the producer this
+// library registered under it, so that producer, and only that one, is ever reused.
 //
 // Only touched when a client is constructed or destroyed, never on the data path, so the
 // spin lock costs nothing here and the publish path stays lock-free.
 enum class ClaimState : uint8_t {
     owned,              // a live WebSocketClient owns the id
     pending_release,    // owner destroyed; frees up once its websocket session lets go
+    released,           // no owner left, only the provenance of the producer remains
 };
 
+struct ProducerClaim {
+    ClaimState state = ClaimState::owned;
+    // The producer this library registered at the id, empty while it registered none (a
+    // client owns its whole id range whether or not it uses every producer type). Held
+    // weakly on purpose: the multiplexer owns the producer, and a record that expires with
+    // it is what keeps a multiplexer later allocated at the same address from inheriting
+    // another one's provenance - an address can be recycled, a weak_ptr cannot.
+    std::weak_ptr<ProducerBuffer> producer;
+};
+
+using ProducerClaims = std::unordered_map<uint32_t, ProducerClaim>;
+
 std::atomic_flag g_claims_lock;
-std::unordered_map<const slick::stream_buffer_multiplexer*, std::unordered_map<uint32_t, ClaimState>> g_producer_claims;
+std::unordered_map<const slick::stream_buffer_multiplexer*, ProducerClaims> g_producer_claims;
 
 struct ClaimsGuard {
     ClaimsGuard() noexcept {
@@ -65,38 +83,104 @@ bool producerQuiescent(slick::stream_buffer_multiplexer& mux, uint32_t id) noexc
     return true;
 }
 
-// Reclaims `id` if its owner is gone and its session has let go. Caller holds the lock.
-bool reclaimIfReleased(slick::stream_buffer_multiplexer& mux,
-                       std::unordered_map<uint32_t, ClaimState>& claims,
-                       std::unordered_map<uint32_t, ClaimState>::iterator claim) {
-    if (claim->second == ClaimState::owned || !producerQuiescent(mux, claim->first)) {
-        return false;
+// Who registered the producer an id holds, as far as this library can tell.
+enum class Provenance : uint8_t {
+    unregistered,   // nothing is registered at the id
+    ours,           // this library registered it, and it is still the same producer
+    foreign,        // registered by code outside this library
+};
+
+// `claim` is the id's claim, or nullptr when it has none; `registered` is what the
+// multiplexer currently holds at that id.
+Provenance producerProvenance(const ProducerClaim* claim, const std::shared_ptr<ProducerBuffer>& registered) noexcept {
+    if (!registered) {
+        return Provenance::unregistered;
     }
-    claims.erase(claim);
-    return true;
+    // Identity, not mere presence: a claim whose recorded producer has expired, or names
+    // some other object, was left by a multiplexer that used to live at this address.
+    return claim && claim->producer.lock() == registered ? Provenance::ours : Provenance::foreign;
 }
 
-enum class ClaimResult : uint8_t { ok, owned_by_live_client, session_still_writing };
+// A claim carries information only while it names a live owner, a session that may still
+// be writing, or a producer this library registered and could hand back. One that names
+// none of those is dropped, so the registry shrinks back to empty as clients and
+// multiplexers go away, and a multiplexer later allocated at the same address starts
+// clean. Nothing here dereferences a multiplexer - by now it may be destroyed.
+bool claimIsInert(const ProducerClaim& claim) noexcept {
+    return claim.state == ClaimState::released && claim.producer.expired();
+}
+
+// Caller holds the lock. Only ever called while a client is constructed or destroyed, and
+// the registry holds one entry per producer id in use, so walking all of it costs nothing.
+void pruneInertClaims() noexcept {
+    for (auto mux_claims = g_producer_claims.begin(); mux_claims != g_producer_claims.end(); ) {
+        auto &claims = mux_claims->second;
+        for (auto claim = claims.begin(); claim != claims.end(); ) {
+            claim = claimIsInert(claim->second) ? claims.erase(claim) : std::next(claim);
+        }
+        mux_claims = claims.empty() ? g_producer_claims.erase(mux_claims) : std::next(mux_claims);
+    }
+}
+
+enum class ClaimResult : uint8_t { ok, owned_by_live_client, session_still_writing, foreign_producer };
+
+// The claim table of `mux`, or nullptr when it has no registry entry. Caller holds the
+// lock, and must not keep the pointer past pruneInertClaims().
+ProducerClaims* findClaims(const slick::stream_buffer_multiplexer& mux) noexcept {
+    auto mux_claims = g_producer_claims.find(&mux);
+    return mux_claims == g_producer_claims.end() ? nullptr : &mux_claims->second;
+}
+
+// The claim on `id`, or nullptr when it has none. `claims` is null for a multiplexer with
+// no registry entry at all - one this library has never registered a producer on.
+// Caller holds the lock.
+ProducerClaim* findClaim(ProducerClaims* claims, uint32_t id) noexcept {
+    if (!claims) {
+        return nullptr;
+    }
+    auto claim = claims->find(id);
+    return claim == claims->end() ? nullptr : &claim->second;
+}
+
+// Decides a single id: reclaims it when the client that owned it is gone and its session
+// has let go, and reports whatever else still stands in the way. Caller holds the lock.
+ClaimResult scanProducerId(slick::stream_buffer_multiplexer& mux, ProducerClaims* claims, uint32_t id) {
+    auto* claimed = findClaim(claims, id);
+    if (claimed) {
+        switch (claimed->state) {
+        case ClaimState::owned:
+            return ClaimResult::owned_by_live_client;
+        case ClaimState::pending_release:
+            if (!producerQuiescent(mux, id)) {
+                return ClaimResult::session_still_writing;
+            }
+            claimed->state = ClaimState::released;      // parked, and now free
+            break;
+        case ClaimState::released:
+            break;
+        }
+    }
+    // No client of this library holds the id - but it is only ours to take if nothing
+    // else has registered a producer under it.
+    return producerProvenance(claimed, mux.get_producer_buffer(id)) == Provenance::foreign
+            ? ClaimResult::foreign_producer : ClaimResult::ok;
+}
 
 // Walks the ids a client at `producer_offset` owns, reclaiming the ones a destroyed client
 // left parked, and reports the first one still in use through `conflict`. Caller holds the
 // lock. Both claimProducerIds() and isProducerOffsetAvailable() decide through this, so
 // "is this offset free?" and "may I have this offset?" can never answer differently.
 ClaimResult scanOwnedProducerIds(slick::stream_buffer_multiplexer& mux,
-                                 std::unordered_map<uint32_t, ClaimState>& claims,
+                                 ProducerClaims* claims,
                                  uint32_t producer_offset,
                                  uint32_t& conflict) {
     auto result = ClaimResult::ok;
     for (uint32_t i = 0; i < PRODUCER_IDS_PER_CLIENT; ++i) {
-        auto claim = claims.find(producer_offset + i);
-        if (claim == claims.end() || reclaimIfReleased(mux, claims, claim)) {
-            continue;   // never claimed, or parked and now free
-        }
-        if (result == ClaimResult::ok) {    // first conflict wins; the loop runs on so
-                                            // the rest of the range is still reclaimed
-            conflict = claim->first;
-            result = claim->second == ClaimState::owned ? ClaimResult::owned_by_live_client
-                                                        : ClaimResult::session_still_writing;
+        const uint32_t id = producer_offset + i;
+        const auto id_result = scanProducerId(mux, claims, id);
+        if (id_result != ClaimResult::ok && result == ClaimResult::ok) {
+            conflict = id;          // first conflict wins; the loop runs on so the rest
+            result = id_result;     // of the range is still reclaimed
         }
     }
     return result;
@@ -109,37 +193,67 @@ ClaimResult scanOwnedProducerIds(slick::stream_buffer_multiplexer& mux,
 ClaimResult claimProducerIds(slick::stream_buffer_multiplexer& mux, uint32_t producer_offset, uint32_t& conflict) {
     ClaimsGuard guard;
     auto &claims = g_producer_claims[&mux];
-    const auto result = scanOwnedProducerIds(mux, claims, producer_offset, conflict);
+    const auto result = scanOwnedProducerIds(mux, &claims, producer_offset, conflict);
     if (result != ClaimResult::ok) {
-        return result;      // a conflict leaves a claim behind, so the entry is not empty
+        pruneInertClaims();     // may drop the entry the lookup above just created
+        return result;
     }
     for (uint32_t i = 0; i < PRODUCER_IDS_PER_CLIENT; ++i) {
-        claims[producer_offset + i] = ClaimState::owned;
+        // Keeps whatever producer the claim already records: that is exactly the
+        // registration the new client is about to reuse.
+        claims[producer_offset + i].state = ClaimState::owned;
     }
     return result;
 }
 
 // Never waits: ids whose buffer is already free are released, the rest are parked for a
 // later claim to reclaim. Destroying a client must not block a trading thread on a socket
-// teardown that runs on slick-net's service thread.
+// teardown that runs on slick-net's service thread. The recorded producer survives either
+// way - that record is what lets the next client at this offset reuse the registration,
+// and tell it apart from one somebody else registered.
 void releaseProducerIds(slick::stream_buffer_multiplexer& mux, uint32_t producer_offset) {
     ClaimsGuard guard;
-    auto it = g_producer_claims.find(&mux);
-    if (it == g_producer_claims.end()) {
+    auto* claims = findClaims(mux);
+    if (!claims) {
         return;
     }
     for (uint32_t i = 0; i < PRODUCER_IDS_PER_CLIENT; ++i) {
-        auto claim = it->second.find(producer_offset + i);
-        if (claim == it->second.end()) {
-            continue;
+        const uint32_t id = producer_offset + i;
+        if (auto* claim = findClaim(claims, id)) {
+            claim->state = producerQuiescent(mux, id) ? ClaimState::released
+                                                      : ClaimState::pending_release;
         }
-        claim->second = ClaimState::pending_release;
-        reclaimIfReleased(mux, it->second, claim);
     }
-    if (it->second.empty()) {
-        // Drop the entry so a multiplexer later allocated at the same address starts clean.
-        g_producer_claims.erase(it);
+    pruneInertClaims();
+}
+
+// Records that this library registered `producer` at `producer_id`, so a later client can
+// tell it from a producer somebody else put there. The caller claimed the id first, so
+// the claim exists; the lookups only keep a lost race from writing a stray entry.
+void recordRegisteredProducer(slick::stream_buffer_multiplexer& mux,
+                              uint32_t producer_id,
+                              const std::shared_ptr<ProducerBuffer>& producer) {
+    ClaimsGuard guard;
+    if (auto* claim = findClaim(findClaims(mux), producer_id)) {
+        claim->producer = producer;
     }
+}
+
+// The provenance of `registered`, the producer the multiplexer currently holds at
+// `producer_id`. Takes the lock itself, so it is callable from outside the claim path.
+Provenance registeredProducerProvenance(slick::stream_buffer_multiplexer& mux,
+                                        uint32_t producer_id,
+                                        const std::shared_ptr<ProducerBuffer>& registered) {
+    ClaimsGuard guard;
+    return producerProvenance(findClaim(findClaims(mux), producer_id), registered);
+}
+
+// The message both refusals of a foreign producer carry: the one init() raises for the
+// whole range up front, and the one addOrReuseProducer() raises per id as a last resort.
+std::string foreignProducerError(uint32_t producer_id) {
+    return "producer_id " + std::to_string(producer_id) +
+        " is registered in the stream buffer multiplexer by code outside this library. Give the "
+        "WebSocketClient a producer_offset whose whole id range is its own.";
 }
 
 }   // anonymous namespace
@@ -445,15 +559,14 @@ WebSocketClient::~WebSocketClient() {
 
 bool WebSocketClient::isProducerOffsetAvailable(slick::stream_buffer_multiplexer& mux, uint32_t producer_offset) noexcept {
     ClaimsGuard guard;
-    auto it = g_producer_claims.find(&mux);
-    if (it == g_producer_claims.end()) {
-        return true;
-    }
+    // A multiplexer this library has never touched is still scanned - external code may
+    // have registered a producer in the range, which the constructor refuses just as
+    // firmly. It gets no registry entry of its own: the scan takes a null claim table,
+    // leaving this allocation-free, as a noexcept query should be.
     uint32_t conflict = 0;
-    const bool available = scanOwnedProducerIds(mux, it->second, producer_offset, conflict) == ClaimResult::ok;
-    if (it->second.empty()) {
-        g_producer_claims.erase(it);
-    }
+    const bool available =
+        scanOwnedProducerIds(mux, findClaims(mux), producer_offset, conflict) == ClaimResult::ok;
+    pruneInertClaims();     // invalidates the claim table above - nothing reads it below
     return available;
 }
 
@@ -465,8 +578,16 @@ std::shared_ptr<slick::stream_buffer_multiplexer::producer_buffer> WebSocketClie
 ) {
     // The multiplexer keeps producers registered for its whole lifetime, so an external
     // multiplexer still holds the producers of an already destroyed client. Reuse that
-    // registration - re-adding it would throw std::invalid_argument.
+    // registration - re-adding it would throw std::invalid_argument - but only when this
+    // library is what registered it: writing into a producer somebody else registered would
+    // put a second writer on a single-producer buffer its owner is already publishing to.
+    // init() claimed the whole range first and refuses a foreign producer there, so this
+    // only catches one registered in between - nothing serialises an external
+    // add_producer() against this library.
     if (auto existing = mux_.get_producer_buffer(producer_id)) {
+        if (registeredProducerProvenance(mux_, producer_id, existing) != Provenance::ours) {
+            throw std::invalid_argument(foreignProducerError(producer_id));
+        }
         if (existing->capacity() != capacity || existing->control_size() != control_size) {
             LOG_WARN("Reusing producer {} registered with capacity {} and record size {}, requested capacity {} and record size {}.",
                      producer_id, existing->capacity(), existing->control_size(), capacity, control_size);
@@ -476,7 +597,9 @@ std::shared_ptr<slick::stream_buffer_multiplexer::producer_buffer> WebSocketClie
         }
         return existing;
     }
-    return mux_.add_producer(producer_id, capacity, control_size, shm_name);
+    auto producer = mux_.add_producer(producer_id, capacity, control_size, shm_name);
+    recordRegisteredProducer(mux_, producer_id, producer);
+    return producer;
 }
 
 void WebSocketClient::init(
@@ -493,7 +616,8 @@ void WebSocketClient::init(
     producer_buffers_.resize(producer_offset_ + ProducerType::_PRODUCER_TYPE_COUNT_, nullptr);
 
     // Claim before registering anything: a producer left behind by a destroyed client is
-    // reusable, one a live client still owns is a producer_offset collision.
+    // reusable, one a live client still owns is a producer_offset collision, and one this
+    // library never registered belongs to somebody else and is not ours to write to.
     uint32_t conflict = 0;
     switch (claimProducerIds(mux_, producer_offset_, conflict)) {
     case ClaimResult::owned_by_live_client:     // a bug in the caller: overlapping offsets
@@ -503,6 +627,8 @@ void WebSocketClient::init(
         throw std::runtime_error("producer_id " + std::to_string(conflict) +
             " is still being written by the websocket session of a destroyed WebSocketClient. Retry once "
             "WebSocketClient::isProducerOffsetAvailable() returns true.");
+    case ClaimResult::foreign_producer:         // a bug in the caller: the range is not its own
+        throw std::invalid_argument(foreignProducerError(conflict));
     case ClaimResult::ok:
         break;
     }

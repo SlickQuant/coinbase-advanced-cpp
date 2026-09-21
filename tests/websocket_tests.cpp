@@ -742,6 +742,76 @@ namespace coinbase::tests {
                                               "", "ws://127.0.0.1:1/user"));
     }
 
+    // A producer this library did not register is never reused. Its owner registered it to
+    // write to it, and the stream_buffer behind a producer has a single-producer contract -
+    // a client publishing into it as well would interleave two writers. The whole id range
+    // is guarded, not merely the ids the client's urls would have registered.
+    TEST(WebSocketClientUnitTests, ForeignProducerInOffsetRangeIsRejected) {
+        constexpr uint32_t kOffset = 0;
+        constexpr uint32_t kBufferSize = 1u << 16;
+        constexpr uint32_t kRecordSize = 256;
+
+        for (uint32_t i = 0; i < ProducerType::_PRODUCER_TYPE_COUNT_; ++i) {
+            ConcreteUserThreadCallbacks callbacks;
+            slick::stream_buffer_multiplexer mux(1024);     // one mux per id: no remove_producer()
+            const auto* foreign = mux.add_producer(kOffset + i, kBufferSize, kRecordSize).get();
+            ASSERT_NE(foreign, nullptr);
+
+            EXPECT_FALSE(WebSocketClient::isProducerOffsetAvailable(mux, kOffset));
+            EXPECT_THROW(makeExternalMuxClient(callbacks, mux, kOffset, kBufferSize, kRecordSize),
+                         std::invalid_argument);
+
+            // Refused before registering anything, and the foreign producer is untouched.
+            EXPECT_EQ(mux.producer_count(), 1u);
+            EXPECT_EQ(mux.get_producer_buffer(kOffset + i).get(), foreign);
+        }
+    }
+
+    // Only the range a foreign producer sits in is refused, so a multiplexer shared with
+    // code that registers producers of its own still serves clients at other offsets.
+    TEST(WebSocketClientUnitTests, ForeignProducerDoesNotBlockOtherOffsets) {
+        ConcreteUserThreadCallbacks callbacks;
+        slick::stream_buffer_multiplexer mux(1024);
+        constexpr uint32_t kClientOffset = ProducerType::_PRODUCER_TYPE_COUNT_;
+
+        const auto* foreign = mux.add_producer(0, 1u << 16, 256).get();
+        ASSERT_NE(foreign, nullptr);
+
+        EXPECT_TRUE(WebSocketClient::isProducerOffsetAvailable(mux, kClientOffset));
+        std::unique_ptr<WebSocketClient> client;
+        ASSERT_NO_THROW(client = makeExternalMuxClient(callbacks, mux, kClientOffset));
+
+        EXPECT_FALSE(WebSocketClient::isProducerOffsetAvailable(mux, 0));
+        EXPECT_EQ(mux.get_producer_buffer(0).get(), foreign);
+    }
+
+    // Provenance is recorded against the producer object, not the producer id: an allocator
+    // may hand back the address of a destroyed multiplexer, and a registry keyed by address
+    // alone would then read another multiplexer's foreign producer as one of this library's
+    // own, left behind for reuse.
+    TEST(WebSocketClientUnitTests, RecycledMultiplexerAddressDoesNotInheritProvenance) {
+        constexpr uint32_t kOffset = 0;
+        constexpr uint32_t kBufferSize = 1u << 16;
+        constexpr uint32_t kRecordSize = 256;
+        {
+            ConcreteUserThreadCallbacks callbacks;
+            auto mux = std::make_unique<slick::stream_buffer_multiplexer>(1024);
+            makeExternalMuxClient(callbacks, *mux, kOffset, kBufferSize, kRecordSize);
+        }   // client destroyed, then the multiplexer whose producers it registered
+
+        // Quite possibly the very address freed above.
+        auto mux = std::make_unique<slick::stream_buffer_multiplexer>(1024);
+        const auto* foreign = mux->add_producer(kOffset + ProducerType::MD_DATA,
+                                                kBufferSize, kRecordSize).get();
+        ASSERT_NE(foreign, nullptr);
+
+        ConcreteUserThreadCallbacks callbacks;
+        EXPECT_FALSE(WebSocketClient::isProducerOffsetAvailable(*mux, kOffset));
+        EXPECT_THROW(makeExternalMuxClient(callbacks, *mux, kOffset, kBufferSize, kRecordSize),
+                     std::invalid_argument);
+        EXPECT_EQ(mux->get_producer_buffer(kOffset + ProducerType::MD_DATA).get(), foreign);
+    }
+
     // Client ids are never recycled, so a control record left behind by a destroyed
     // client can never be mistaken for one from a new client that the allocator happens
     // to place at the same address.

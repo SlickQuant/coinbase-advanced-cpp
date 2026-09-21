@@ -186,10 +186,12 @@ public:
     // [producer_offset, producer_offset + _PRODUCER_TYPE_COUNT_), whether or not both urls
     // are configured - a market-data-only client owns the user-data ids too. Producers left
     // registered by a destroyed client are reused as-is, keeping the capacity and record
-    // size they were created with. Throws std::invalid_argument when the range overlaps a
-    // client that is still alive (a caller bug), and std::runtime_error while the previous
-    // owner's websocket session can still be writing to those buffers (transient - poll
-    // isProducerOffsetAvailable() instead of catching it).
+    // size they were created with; producers registered by anything other than a
+    // WebSocketClient are never reused, since their owner already writes to them. Throws
+    // std::invalid_argument when the range overlaps a client that is still alive or holds
+    // a producer registered outside this library (both caller bugs), and std::runtime_error
+    // while the previous owner's websocket session can still be writing to those buffers
+    // (transient - poll isProducerOffsetAvailable() instead of catching it).
     WebSocketClient(
         WebsocketCallbacks *callbacks,
         slick::stream_buffer_multiplexer &mux,
@@ -238,11 +240,11 @@ public:
     }
 
     // Non-blocking check that a client can be constructed at `producer_offset` on `mux`:
-    // false while a live client owns any of those producer ids, and while the websocket
-    // session of a destroyed client can still be writing to their buffers. It covers
-    // exactly the ids the constructor claims, so true means construction is not refused.
-    // Poll this instead of catching the constructor's std::runtime_error when re-creating
-    // a client.
+    // false while a live client owns any of those producer ids, while the websocket session
+    // of a destroyed client can still be writing to their buffers, and while any of them
+    // holds a producer registered outside this library. It covers exactly the ids the
+    // constructor claims, so true means construction is not refused. Poll this instead of
+    // catching the constructor's std::runtime_error when re-creating a client.
     static bool isProducerOffsetAvailable(slick::stream_buffer_multiplexer& mux, uint32_t producer_offset) noexcept;
 
     // Process-wide unique id of this client. Never reused, not even by a client
@@ -275,10 +277,13 @@ private:
         uint32_t write_buffer_size
     );
     // Register a producer in the multiplexer, reusing the existing registration when
-    // producer_id is already taken. slick::stream_buffer_multiplexer has no
-    // remove_producer(), so producers registered by a client outlive it: a new client
-    // created on an external multiplexer with the same producer_offset must reuse them
-    // instead of letting add_producer() throw std::invalid_argument.
+    // producer_id is already taken by a producer this library registered.
+    // slick::stream_buffer_multiplexer has no remove_producer(), so producers registered by
+    // a client outlive it: a new client created on an external multiplexer with the same
+    // producer_offset must reuse them instead of letting add_producer() throw
+    // std::invalid_argument. Throws std::invalid_argument when the registration at
+    // producer_id came from anywhere else - reusing it would make this client a second
+    // writer on a single-producer buffer.
     std::shared_ptr<slick::stream_buffer_multiplexer::producer_buffer> addOrReuseProducer(
         uint32_t producer_id,
         uint64_t capacity,
