@@ -2,13 +2,14 @@
 // Copyright (c) 2025-2026 Slick Quant
 // https://github.com/SlickQuant/slick-socket
 
+#include <atomic>
+#include <memory>
+#include <stdexcept>
+#include <unordered_map>
 #include <coinbase/rest.hpp>
 #include "rest_endpoints.hpp"
 
 namespace coinbase {
-
-std::once_flag CoinbaseRestClient::initialize_products_;
-std::unordered_map<std::string, Product> CoinbaseRestClient::products_;
 
 namespace {
 
@@ -20,6 +21,40 @@ std::string extract_domain(std::string_view base_url) {
     return std::string(base_url.substr(pos + 3));
 }
 
+// Lets the product map be probed with a string_view, so a lookup on the order-building path
+// costs no allocation.
+struct string_hash {
+    using is_transparent = void;
+    size_t operator()(std::string_view s) const noexcept { return std::hash<std::string_view>{}(s); }
+};
+
+using product_map = std::unordered_map<std::string, Product, string_hash, std::equal_to<>>;
+
+// One endpoint's products. The cache is keyed by endpoint because increments are a property of
+// the endpoint that served them: a client pointed at a sandbox or a mock must not be priced off
+// production's metadata, or the other way round.
+//
+// Nodes are immutable once published and are never freed, so a reader holds nothing and
+// synchronizes with nothing - it loads the head pointer and walks the list. That keeps the
+// lookup on the order-building path lock-free and wait-free; what it costs is one small node
+// retained per endpoint that ever initialized, a handful over a process lifetime.
+struct endpoint_products {
+    std::string base_url;
+    product_map products;
+    const endpoint_products *next = nullptr;
+};
+
+std::atomic<const endpoint_products*> published_products{nullptr};
+
+const endpoint_products* find_endpoint(const endpoint_products *head, std::string_view base_url) {
+    for (const auto *node = head; node != nullptr; node = node->next) {
+        if (node->base_url == base_url) {
+            return node;
+        }
+    }
+    return nullptr;
+}
+
 }   // namespace
 
 CoinbaseRestClient::CoinbaseRestClient(std::string base_url)
@@ -29,21 +64,71 @@ CoinbaseRestClient::CoinbaseRestClient(std::string base_url)
     initialize_products(base_url_);
 }
 
-const Product& CoinbaseRestClient::product(std::string_view product_id) {
-    return products_[std::string(product_id)];
+const Product* CoinbaseRestClient::find_product(std::string_view base_url, std::string_view product_id) {
+    const auto *endpoint = find_endpoint(published_products.load(std::memory_order_acquire), base_url);
+    if (endpoint == nullptr) {
+        return nullptr;
+    }
+    auto it = endpoint->products.find(product_id);
+    return it == endpoint->products.end() ? nullptr : &it->second;
 }
 
-void CoinbaseRestClient::initialize_products(std::string_view base_url) {
-    std::call_once(initialize_products_, [base_url]() {
-        for (auto &prod : detail::run(detail::list_public_products(base_url, {}))) {
-            products_.emplace(prod.product_id, std::move(prod));
+const Product& CoinbaseRestClient::product(std::string_view base_url, std::string_view product_id) {
+    const auto *prod = find_product(base_url, product_id);
+    if (prod == nullptr) {
+        throw std::out_of_range(std::format("unknown product {} at {}", product_id, base_url));
+    }
+    return *prod;
+}
+
+const Product& CoinbaseRestClient::product(std::string_view product_id) const {
+    return product(base_url_, product_id);
+}
+
+bool CoinbaseRestClient::initialize_products(std::string_view base_url) {
+    auto *head = published_products.load(std::memory_order_acquire);
+    if (find_endpoint(head, base_url) != nullptr) {
+        return true;
+    }
+
+    // run() reports a failed request as an empty list, so an empty result is a failure to cache -
+    // a live endpoint always lists products. Publishing it would bind the endpoint to a transient
+    // error forever; leaving it unpublished means the next client, or the next explicit call,
+    // retries.
+    auto products = detail::run(detail::list_public_products(base_url, {}));
+    if (products.empty()) {
+        LOG_ERROR("initialize_products failed. no products returned by {}", base_url);
+        return false;
+    }
+
+    auto node = std::make_unique<endpoint_products>();
+    node->base_url = std::string(base_url);
+    node->products.reserve(products.size());
+    for (auto &prod : products) {
+        node->products.emplace(prod.product_id, std::move(prod));
+    }
+
+    // Two clients built concurrently on one endpoint can both get here and both fetch; the loser
+    // drops its node and uses the winner's. One redundant request in a rare race is the price of
+    // never blocking a reader.
+    for (;;) {
+        if (find_endpoint(head, base_url) != nullptr) {
+            return true;
         }
-    });
+        node->next = head;
+        if (published_products.compare_exchange_weak(head, node.get(),
+                                                     std::memory_order_release,
+                                                     std::memory_order_acquire)) {
+            node.release();   // immortal: readers walk the list without holding a reference
+            return true;
+        }
+    }
 }
 
 void CoinbaseRestClient::set_base_url(std::string_view url) {
     base_url_ = std::string(url);
     domain_ = extract_domain(base_url_);
+    initialize_products(base_url_);
 }
 
 uint64_t CoinbaseRestClient::get_server_time() const {

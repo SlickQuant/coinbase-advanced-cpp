@@ -193,6 +193,7 @@ inline endpoint<std::vector<Candle>> get_product_candles(std::string_view base_u
 // Builds the create-order request body. Returns an empty optional and fills `error` when the order
 // is invalid, so it is rejected locally instead of costing a round trip.
 inline std::optional<json> make_create_order_body(
+    std::string_view base_url,
     const std::string &client_order_id,
     const std::string &product_id,
     Side side,
@@ -226,6 +227,21 @@ inline std::optional<json> make_create_order_body(
         }
     };
 
+    // Looked up on demand, and only where a price has to be formatted against an increment. An
+    // order that needs no increment - a plain market order - still goes through when the endpoint
+    // never listed the product; anything that would otherwise be priced off a zero increment, and
+    // so rounded to whole units, is rejected here instead of sent.
+    const Product *prod = nullptr;
+    auto load_product = [&prod, base_url, &product_id]() {
+        if (prod == nullptr) {
+            prod = CoinbaseRestClient::find_product(base_url, product_id);
+        }
+        return prod != nullptr;
+    };
+    auto reject_unknown_product = [&reject, base_url, &product_id] {
+        return reject(std::format("No product metadata for {} at {}", product_id, base_url));
+    };
+
     json body {
         {"client_order_id", client_order_id},
         {"product_id", product_id},
@@ -250,14 +266,16 @@ inline std::optional<json> make_create_order_body(
             }
 
             if (stop_price.has_value() && take_profit_price.has_value()) {
-                auto &prod = CoinbaseRestClient::product(product_id);
-                if (prod.product_type == ProductType::SPOT && side == Side::SELL) {
+                if (!load_product()) {
+                    return reject_unknown_product();
+                }
+                if (prod->product_type == ProductType::SPOT && side == Side::SELL) {
                     return reject("Invalid order side for attached TP/SL");
                 }
                 body["attached_order_configuration"] = {
                     {"trigger_bracket_gtc", {
-                        {"limit_price", to_string(take_profit_price.value(), prod.quote_increment)},
-                        {"stop_trigger_price", to_string(stop_price.value(), prod.quote_increment)},
+                        {"limit_price", to_string(take_profit_price.value(), prod->quote_increment)},
+                        {"stop_trigger_price", to_string(stop_price.value(), prod->quote_increment)},
                     }}
                 };
             }
@@ -270,7 +288,10 @@ inline std::optional<json> make_create_order_body(
             if (std::isnan(limit_price)) {
                 return reject("Invalid limit price NAN");
             }
-            const auto quote_increment = CoinbaseRestClient::product(product_id).quote_increment;
+            if (!load_product()) {
+                return reject_unknown_product();
+            }
+            const auto quote_increment = prod->quote_increment;
             if (time_in_force == TimeInForce::FILL_OR_KILL) {
                 auto &config = order_configuration["limit_limit_fok"];
                 size_field(config, size);
@@ -302,14 +323,14 @@ inline std::optional<json> make_create_order_body(
             }
 
             if (stop_price.has_value() && take_profit_price.has_value()) {
-                auto &prod = CoinbaseRestClient::product(product_id);
-                if (prod.product_type == ProductType::SPOT && side == Side::SELL) {
+                // prod is loaded above: every limit order formats its own price first.
+                if (prod->product_type == ProductType::SPOT && side == Side::SELL) {
                     return reject("Invalid order side for attached TP/SL");
                 }
                 body["attached_order_configuration"] = {
                     {"trigger_bracket_gtc", {
-                        {"limit_price", to_string(take_profit_price.value(), prod.quote_increment)},
-                        {"stop_trigger_price", to_string(stop_price.value(), prod.quote_increment)},
+                        {"limit_price", to_string(take_profit_price.value(), prod->quote_increment)},
+                        {"stop_trigger_price", to_string(stop_price.value(), prod->quote_increment)},
                     }}
                 };
             }
@@ -325,7 +346,10 @@ inline std::optional<json> make_create_order_body(
             if (!stop_price.has_value() || std::isnan(stop_price.value())) {
                 return reject(std::format("Invalid stop_price {}", stop_price.value_or(NAN)));
             }
-            const auto quote_increment = CoinbaseRestClient::product(product_id).quote_increment;
+            if (!load_product()) {
+                return reject_unknown_product();
+            }
+            const auto quote_increment = prod->quote_increment;
             if (time_in_force == TimeInForce::GOOD_UNTIL_CANCELLED) {
                 auto &config = order_configuration["stop_limit_stop_limit_gtc"];
                 config["base_size"] = std::to_string(size);
@@ -351,16 +375,21 @@ inline std::optional<json> make_create_order_body(
                 return reject("twap order must have start and end time");
             }
 
+            if (!load_product()) {
+                return reject_unknown_product();
+            }
             auto &config = order_configuration["twap_limit_gtd"];
             size_field(config, size);
-            config["limit_price"] = to_string(limit_price, CoinbaseRestClient::product(product_id).quote_increment);
+            config["limit_price"] = to_string(limit_price, prod->quote_increment);
             config["start_time"] = timestamp_to_string(twap_start_time.value());
             config["end_time"] = timestamp_to_string(end_time.value());
             break;
         }
         case OrderType::BRACKET: {
-            auto &prod = CoinbaseRestClient::product(product_id);
-            if (prod.product_type == ProductType::SPOT && side == Side::BUY) {
+            if (!load_product()) {
+                return reject_unknown_product();
+            }
+            if (prod->product_type == ProductType::SPOT && side == Side::BUY) {
                 return reject("Invalid order side for Bracket order");
             }
             if (size_in_quote) {
@@ -370,16 +399,16 @@ inline std::optional<json> make_create_order_body(
             if (stop_price.has_value() && take_profit_price.has_value()) {
                 order_configuration["trigger_bracket_gtc"] = {
                     {"base_size", std::to_string(size)},
-                    {"limit_price", to_string(take_profit_price.value(), prod.quote_increment)},
-                    {"stop_trigger_price", to_string(stop_price.value(), prod.quote_increment)},
+                    {"limit_price", to_string(take_profit_price.value(), prod->quote_increment)},
+                    {"stop_trigger_price", to_string(stop_price.value(), prod->quote_increment)},
                 };
             }
             else if (stop_price.has_value() && !std::isnan(limit_price)) {
                 // use limit_price as take_profit_price for stop loss only bracket order
                 order_configuration["trigger_bracket_gtc"] = {
                     {"base_size", std::to_string(size)},
-                    {"limit_price", to_string(limit_price, prod.quote_increment)},
-                    {"stop_trigger_price", to_string(stop_price.value(), prod.quote_increment)},
+                    {"limit_price", to_string(limit_price, prod->quote_increment)},
+                    {"stop_trigger_price", to_string(stop_price.value(), prod->quote_increment)},
                 };
             }
             else {
@@ -443,7 +472,7 @@ inline create_order_request make_create_order(
     create_order_request out;
     try {
         std::string error;
-        auto body = make_create_order_body(client_order_id, product_id, side, order_type, time_in_force,
+        auto body = make_create_order_body(base_url, client_order_id, product_id, side, order_type, time_in_force,
                                            size, limit_price, post_only, size_in_quote, stop_price,
                                            take_profit_price, end_time, twap_start_time, sor_preference,
                                            leverage, margin_type, attached_order_configuration,
@@ -546,22 +575,29 @@ inline modify_order_request make_modify_order(
     modify_order_request out;
     out.order_id = std::move(order_id);
     try {
-        auto &prod = CoinbaseRestClient::product(product_id);
+        // Without the endpoint's increment every price below would be rounded to whole units, so
+        // an unknown product leaves req.url empty and the call is reported as a failure.
+        const auto *prod = CoinbaseRestClient::find_product(base_url, product_id);
+        if (prod == nullptr) {
+            LOG_ERROR("modify_order failed. order_id: {}, error: no product metadata for {} at {}",
+                      out.order_id, product_id, base_url);
+            return out;
+        }
         json body {
             {"order_id", out.order_id},
             {"size", std::to_string(size)},
         };
-        body["price"] = to_string(price, prod.quote_increment);
+        body["price"] = to_string(price, prod->quote_increment);
         if (stop_price.has_value() && take_profit_price.has_value()) {
             body["attached_order_configuration"] = {
                 {"trigger_bracket_gtc", {
-                    {"limit_price", to_string(take_profit_price.value(), prod.quote_increment)},
-                    {"stop_trigger_price", to_string(stop_price.value(), prod.quote_increment)},
+                    {"limit_price", to_string(take_profit_price.value(), prod->quote_increment)},
+                    {"stop_trigger_price", to_string(stop_price.value(), prod->quote_increment)},
                 }}
             };
         }
         else if (stop_price.has_value()) {
-            body["stop_price"] = to_string(stop_price.value(), prod.quote_increment);
+            body["stop_price"] = to_string(stop_price.value(), prod->quote_increment);
         }
         if (cancel_attached_order.has_value()) {
             body["cancel_attached_order"] = cancel_attached_order.value();

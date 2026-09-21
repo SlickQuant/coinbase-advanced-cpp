@@ -155,12 +155,45 @@ stays free to run timers and other coroutines while a request is in flight - a s
 up nothing but its own coroutine. Both clients share a single definition per endpoint, so they
 always send the same request and parse the same response.
 
-Constructing a client primes a shared product cache; the first client created anywhere in the
-process does that with one blocking request, so build the client before entering the event loop
-rather than from inside a coroutine.
+Constructing a client primes the product cache for its endpoint with one blocking request, so
+build the client before entering the event loop rather than from inside a coroutine.
+`set_base_url()` primes the new endpoint the same way. See
+[Product cache](#product-cache) for what the cache holds and how a failed fetch is handled.
 
 The two fee-rate helpers, `get_taker_fee_rate()` and `get_maker_fee_rate()`, are available on the
 synchronous client only.
+
+#### Product cache
+
+Order prices and sizes are formatted to the increments the venue publishes for a product, so both
+clients keep a cache of product metadata and consult it whenever they build an order.
+
+The cache is keyed by endpoint. Increments belong to the endpoint that served them, so a client
+pointed at a sandbox, a mock or a replay server never reads production's metadata, and vice versa.
+Each endpoint is fetched once, on the first client constructed against it.
+
+```cpp
+// Populated for this client's endpoint at construction; throws std::out_of_range when the
+// endpoint does not list the product.
+const auto &btc = client.product("BTC-USD");
+
+// The same lookup without the throw.
+if (const auto *prod = coinbase::CoinbaseRestClient::find_product(client.base_url(), "BTC-USD")) {
+    // ...
+}
+
+// Fetch an endpoint's products explicitly; returns false when the fetch failed.
+coinbase::CoinbaseRestClient::initialize_products("https://api.coinbase.com");
+```
+
+A fetch that fails caches nothing, so the next client built against that endpoint - or an explicit
+`initialize_products()` call - retries rather than leaving the endpoint permanently without
+products. Until an endpoint has products, an order that needs an increment to format a price is
+rejected locally, with the product named in `error_response.message`, instead of being sent with
+the price rounded to whole units.
+
+Lookups are lock-free: a published endpoint is immutable, so building an order never blocks on the
+cache.
 
 #### WebSocket Client
 

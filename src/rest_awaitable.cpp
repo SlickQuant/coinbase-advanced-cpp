@@ -24,18 +24,29 @@ CoinbaseAwaitableRestClient::CoinbaseAwaitableRestClient(std::string base_url)
     : base_url_(std::move(base_url))
     , domain_(extract_domain(base_url_))
 {
-    // The shared product cache is primed once, with one blocking request; construct the client
+    // The endpoint's product cache is primed with one blocking request; construct the client
     // before entering the event loop rather than from inside a coroutine.
     CoinbaseRestClient::initialize_products(base_url_);
 }
 
-const Product& CoinbaseAwaitableRestClient::product(std::string_view product_id) {
-    return CoinbaseRestClient::product(product_id);
+const Product& CoinbaseAwaitableRestClient::product(std::string_view product_id) const {
+    return CoinbaseRestClient::product(base_url_, product_id);
+}
+
+const Product& CoinbaseAwaitableRestClient::product(std::string_view base_url, std::string_view product_id) {
+    return CoinbaseRestClient::product(base_url, product_id);
+}
+
+const Product* CoinbaseAwaitableRestClient::find_product(std::string_view base_url, std::string_view product_id) {
+    return CoinbaseRestClient::find_product(base_url, product_id);
 }
 
 void CoinbaseAwaitableRestClient::set_base_url(std::string_view url) {
     base_url_ = std::string(url);
     domain_ = extract_domain(base_url_);
+    // Blocking, like the constructor: re-pointing the client at another endpoint primes that
+    // endpoint's products. Do it outside the event loop.
+    CoinbaseRestClient::initialize_products(base_url_);
 }
 
 asio::awaitable<uint64_t> CoinbaseAwaitableRestClient::get_server_time() const {

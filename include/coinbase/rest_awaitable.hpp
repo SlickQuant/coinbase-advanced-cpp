@@ -150,7 +150,11 @@ public:
     asio::awaitable<std::vector<PerpsPortfolioBalance>> get_perps_portfolio_balances(std::string_view portfolio_uuid) const;
     asio::awaitable<bool> opt_in_or_out_multi_asset_collateral(std::string_view portfolio_uuid, bool enabled) const;
 
-    static const Product& product(std::string_view product_id);
+    // Product metadata for this client's endpoint. Both clients share one cache, keyed by
+    // endpoint; see CoinbaseRestClient::product().
+    const Product& product(std::string_view product_id) const;
+    static const Product& product(std::string_view base_url, std::string_view product_id);
+    static const Product* find_product(std::string_view base_url, std::string_view product_id);
 private:
     std::string base_url_;
     std::string domain_;

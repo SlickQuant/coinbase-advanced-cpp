@@ -6,11 +6,9 @@
 
 #include <cmath>
 #include <cstdint>
-#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <vector>
 #include <nlohmann/json.hpp>
 #include <coinbase/product.hpp>
@@ -136,16 +134,25 @@ public:
     std::vector<PerpsPortfolioBalance> get_perps_portfolio_balances(std::string_view portfolio_uuid) const;
     bool opt_in_or_out_multi_asset_collateral(std::string_view portfolio_uuid, bool enabled) const;
 
-    static const Product& product(std::string_view product_id);
+    // Product metadata for this client's endpoint, as cached by initialize_products(). Throws
+    // std::out_of_range when the endpoint does not list the product - formatting a price against
+    // a default-constructed Product would use a zero increment and round it to whole units.
+    const Product& product(std::string_view product_id) const;
 
-    // Primes the shared product cache that product() reads. Called by every client constructor;
-    // the first call performs one blocking request, later calls are free.
-    static void initialize_products(std::string_view base_url);
+    // The same lookup against an explicit endpoint, for code that holds a base url rather than a
+    // client. product() throws when the product is missing; find_product() reports it as nullptr.
+    static const Product& product(std::string_view base_url, std::string_view product_id);
+    static const Product* find_product(std::string_view base_url, std::string_view product_id);
+
+    // Fetches and caches the products of `base_url`, once per endpoint. Every client constructor
+    // calls this for its own endpoint, and set_base_url() calls it again for the new one: the
+    // first successful call for an endpoint performs one blocking request, later calls are free.
+    // A fetch that comes back empty caches nothing and returns false, so a transient failure is
+    // retried by the next call instead of leaving the endpoint permanently without products.
+    static bool initialize_products(std::string_view base_url);
 private:
     std::string base_url_;
     std::string domain_;
-    static std::once_flag initialize_products_;
-    static std::unordered_map<std::string, Product> products_;
 };
 
 }   // end namespace coinbase
