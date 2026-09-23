@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-09-22
+
+### Added
+- `CoinbaseRestClient::initialize_products(base_url)` — fetches and caches an endpoint's product metadata, once per endpoint. Every client constructor calls it for its own endpoint and `set_base_url()` calls it again for the new one, so the first successful call performs one blocking request and later calls are free. A fetch that comes back empty caches nothing and returns `false`, so a transient failure is retried by the next call
+- `CoinbaseRestClient::find_product(base_url, product_id)` and `CoinbaseAwaitableRestClient::find_product(base_url, product_id)` — product lookup that reports a missing product as `nullptr` instead of throwing
+- `CoinbaseRestClient::product(base_url, product_id)` and `CoinbaseAwaitableRestClient::product(base_url, product_id)` — the same lookup against an explicit endpoint, for code that holds a base url rather than a client
+- Tests covering the per-endpoint product cache, awaitable-client argument lifetimes, query-parameter encoding, and WebSocket producer-offset ownership
+
+### Changed
+- **BREAKING:** Upgraded `slick-net` from v3.1.0 to v4.0.0, in both the build and the installed package config (`find_dependency(slick-net 4.0.0 CONFIG)`)
+- **BREAKING:** `product(product_id)` is no longer static on either client. It is now a const member that resolves against that client's own endpoint, and the static form takes the endpoint first, as `product(base_url, product_id)`. `client.product("BTC-USD")` is unchanged, but class-qualified calls such as `CoinbaseRestClient::product("BTC-USD")` no longer compile
+- **BREAKING:** `product()` now throws `std::out_of_range` when the endpoint does not list the product, instead of returning a default-constructed `Product` whose zero increment silently rounded formatted prices to whole units. Call `find_product()` where a missing product is expected
+- **BREAKING:** `FillQueryParams::end_sequeence_timestamp` renamed to `end_sequence_timestamp`
+- **BREAKING:** An order whose price has to be formatted against an increment is now rejected locally while its endpoint has no products, with the product named in `error_response.message`, instead of being sent with a price rounded off a zero increment. Orders that need no increment, such as a plain market order, are unaffected
+- **BREAKING:** A `WebSocketClient` now claims the whole producer id range `[producer_offset, producer_offset + _PRODUCER_TYPE_COUNT_)` whether or not both urls are configured, so a market-data-only client also owns the user-data ids at its offset
+- **BREAKING:** Producer ids registered by anything other than a `WebSocketClient` are never reused: the constructor throws `std::invalid_argument` and `isProducerOffsetAvailable()` reports the offset unavailable, rather than making the new client a second writer on a single-producer buffer
+- Product metadata is cached per endpoint and shared by both clients, so a client pointed at a sandbox, a mock or a replay server never reads production's metadata, and vice versa
+- Each REST endpoint is now defined once as an I/O-free request builder and response parser shared by the blocking and awaitable clients; `CoinbaseAwaitableRestClient` no longer holds an internal `CoinbaseRestClient`, and its destructor, copy and move operations are defaulted
+- Tests that need API credentials are skipped when none are configured, so CI still runs the public-endpoint tests (server time, public products, market-data WebSocket channels)
+
+### Fixed
+- `CoinbaseAwaitableRestClient` is now genuinely non-blocking. Every coroutine previously `co_return`ed the result of a blocking `CoinbaseRestClient` call, running the whole HTTP round trip on the awaiting executor and stalling timers and unrelated coroutines sharing that event loop; it now suspends on slick-net's `Http::async_*` overloads for the whole exchange
+- Dangling arguments in the awaitable client's deferred operations. No method is a coroutine any more: each signs and builds its request before returning, so the awaitable it hands back owns everything the exchange needs, and views, temporaries and defaulted query objects need not outlive the call — an operation can be held and `co_spawn`ed later. Built inside a coroutine body, none of that ran until the first resumption, by which point those arguments were gone
+- Product metadata was bound to whichever endpoint constructed the first client, through a process-wide `std::once_flag`, so a second client on a different base url read the first endpoint's products. A fetch that came back empty also latched the cache as initialized, leaving that endpoint permanently without products
+- `OrderQueryParams::start_date` was sent as `start_time=`, so the venue ignored the requested start date
+- `FillQueryParams` sent its end-of-range filter under the misspelled name `end_sequeence_timestamp=`, which the venue ignored
+- `UserThreadWebsocketCallbacks` now skips records shorter than `MESSAGE_HEADER_SIZE`. Anything can publish to a producer id on a shared or external multiplexer, so such a record is not one `dispatchData()` wrote: reading the client id and the type tag out of it ran past the record, and the error payload length underflowed into a ~4 GB `std::string`
+- A `WebSocketClient` could reuse a producer buffer owned by unrelated code, silently becoming its second writer
+- An md-only and a user-only client could both be constructed at the same `producer_offset` that `isProducerOffsetAvailable()` reported as unavailable. The claim path and the availability check now decide through one shared range scan, so "is this offset free?" and "may I have this offset?" can never answer differently
+
 ## [1.0.1] - 2026-08-22
 
 ### Added
