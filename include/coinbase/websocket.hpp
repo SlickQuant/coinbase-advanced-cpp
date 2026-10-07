@@ -21,7 +21,7 @@
 #include <coinbase/position.hpp>
 #include <coinbase/auth.hpp>
 #include <coinbase/candle.hpp>
-#include <slick/queue.h>
+#include <slick/queue.hpp>
 #include <slick/stream_buffer_multiplexer.hpp>
 #include <slick/dynamic_buffer.hpp>
 
