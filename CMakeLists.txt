@@ -21,6 +21,26 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(OpenSSL CONFIG REQUIRED)
 find_package(jwt-cpp CONFIG REQUIRED)
 
+if (BUILD_COINBASE_ADVANCED_TESTS)
+    # slick-logger in tests requires a higher version of slick-queue then slick-net, so we fetch it if not found
+    # It has to be declared before slick-net below: slick-net pulls stream-buffer-multiplexer
+    # v2.0.0, which declares and populates slick-queue v2.0.0, and FetchContent keeps only the
+    # FIRST declaration of a name - so declaring it later (in tests/CMakeLists.txt, say) is
+    # silently ignored and slick-logger fails to compile against v2.0.0.
+    find_package(slick-queue 2.1.0 CONFIG QUIET)
+    if (NOT slick-queue_FOUND)
+        message(STATUS "fetching slick-queue...")
+        include(FetchContent)
+        set(BUILD_SLICK_QUEUE_TESTS OFF CACHE BOOL "" FORCE)
+        FetchContent_Declare(
+            slick-queue
+            GIT_REPOSITORY
+            https://github.com/SlickQuant/slick-queue.git
+            GIT_TAG v2.1.0
+        )
+    endif()
+endif()
+
 find_package(slick-net 4.0.0 CONFIG QUIET)
 if (NOT slick-net_FOUND)
     message(STATUS "fetching slick-net...")

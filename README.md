@@ -155,8 +155,9 @@ stays free to run timers and other coroutines while a request is in flight - a s
 up nothing but its own coroutine. Both clients share a single definition per endpoint, so they
 always send the same request and parse the same response.
 
-Constructing a client primes the product cache for its endpoint with one blocking request, so
-build the client before entering the event loop rather than from inside a coroutine.
+Constructing a client primes the product cache for its endpoint with three blocking requests -
+the venue lists spot products, expiring futures and perpetual futures separately - so build the
+client before entering the event loop rather than from inside a coroutine.
 `set_base_url()` primes the new endpoint the same way. See
 [Product cache](#product-cache) for what the cache holds and how a failed fetch is handled.
 
@@ -170,7 +171,10 @@ clients keep a cache of product metadata and consult it whenever they build an o
 
 The cache is keyed by endpoint. Increments belong to the endpoint that served them, so a client
 pointed at a sandbox, a mock or a replay server never reads production's metadata, and vice versa.
-Each endpoint is fetched once, on the first client constructed against it.
+Each endpoint is fetched once, on the first client constructed against it, and holds spot
+products, expiring futures and perpetual futures - the venue lists those three separately, so
+each needs its own request. Futures that are unavailable for the region or account simply come
+back empty, which does not fail the warmup.
 
 ```cpp
 // Populated for this client's endpoint at construction; throws std::out_of_range when the

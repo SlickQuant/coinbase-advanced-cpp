@@ -146,7 +146,9 @@ public:
 
     // Fetches and caches the products of `base_url`, once per endpoint. Every client constructor
     // calls this for its own endpoint, and set_base_url() calls it again for the new one: the
-    // first successful call for an endpoint performs one blocking request, later calls are free.
+    // first successful call for an endpoint performs three blocking requests - spot products,
+    // then expiring and perpetual futures, which the venue lists separately - and later calls are
+    // free.
     // A fetch that comes back empty caches nothing and returns false, so a transient failure is
     // retried by the next call instead of leaving the endpoint permanently without products.
     static bool initialize_products(std::string_view base_url);

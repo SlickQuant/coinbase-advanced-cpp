@@ -101,6 +101,22 @@ bool CoinbaseRestClient::initialize_products(std::string_view base_url) {
         return false;
     }
 
+    // An unfiltered query lists only spot products: futures need an explicit product_type,
+    // and expiring and perpetual contracts need one query each. An order on a product that is
+    // not cached is rejected locally, so leaving these out made every futures order
+    // unplaceable. Futures can be legitimately unavailable (region, entitlements), so an empty
+    // futures list is not a failure - only the spot list above decides whether the endpoint
+    // gets cached at all.
+    for (auto expiry_type : {ContractExpiryType::EXPIRING, ContractExpiryType::PERPETUAL}) {
+        ProductQueryParams futures_params;
+        futures_params.product_type = ProductType::FUTURE;
+        futures_params.contract_expiry_type = expiry_type;
+        auto futures = detail::run(detail::list_public_products(base_url, futures_params));
+        for (auto &prod : futures) {
+            products.emplace_back(std::move(prod));
+        }
+    }
+
     auto node = std::make_unique<endpoint_products>();
     node->base_url = std::string(base_url);
     node->products.reserve(products.size());

@@ -320,7 +320,7 @@ inline void from_json(const json& j, Product& p) {
     DOUBLE_FROM_JSON(j, p, mid_market_price);
     DOUBLE_FROM_JSON(j, p, approximate_quote_24h_volume);
     DOUBLE_FROM_JSON(j, p, market_cap);
-    INT_FROM_JSON(j, p, new_at);
+    TIMESTAMP_FROM_JSON(j, p, new_at);
     ENUM_FROM_JSON(j, p, product_type);
     BOOL_FROM_JSON(j, p, watched);
     BOOL_FROM_JSON(j, p, is_disabled);

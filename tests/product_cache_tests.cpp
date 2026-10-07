@@ -72,6 +72,34 @@ TEST_F(ProductCacheTests, ProductsAreCachedPerEndpoint) {
     EXPECT_EQ(CoinbaseRestClient::find_product(unreachable_url, "BTC-USD"), nullptr);
 }
 
+// Regression: the cache was filled from an unfiltered product query, which lists only spot
+// products, so no futures contract was ever cached. Before the local rejection existed, a
+// futures order went out priced against a zero increment and happened to be accepted whenever
+// whole units were a valid multiple of the real increment; once a cache miss became a local
+// rejection, every futures order was refused before it was sent. Expiring contract ids change
+// over time, so the id under test comes from the venue rather than being hard-coded.
+// Public endpoint, no credentials needed.
+TEST_F(ProductCacheTests, FuturesProductsAreCached) {
+    CoinbaseRestClient client(public_url);
+
+    for (auto expiry_type : {ContractExpiryType::EXPIRING, ContractExpiryType::PERPETUAL}) {
+        ProductQueryParams params;
+        params.product_type = ProductType::FUTURE;
+        params.contract_expiry_type = expiry_type;
+
+        auto listed = client.list_public_products(params);
+        if (listed.empty()) {
+            // Futures can be unavailable for the account region or entitlements.
+            continue;
+        }
+
+        const auto *cached = CoinbaseRestClient::find_product(public_url, listed.front().product_id);
+        ASSERT_NE(cached, nullptr) << "futures product not cached: " << listed.front().product_id;
+        EXPECT_EQ(cached->product_id, listed.front().product_id);
+        EXPECT_GT(cached->quote_increment, 0.);
+    }
+}
+
 // Regression: with the product missing, a limit order was priced against a zero increment and
 // sent with the price rounded to whole units. It is now rejected before anything is signed or
 // sent, and the rejection names the product. No credentials needed - the order never leaves.

@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <coinbase/utils.hpp>
 #include <coinbase/market_data.hpp>
+#include <coinbase/product.hpp>
 #include <nlohmann/json.hpp>
 
 using json = nlohmann::json;
@@ -63,6 +64,41 @@ TEST_F(TimestampParsingTests, ParseL2UpdateMessage) {
     EXPECT_EQ(batch.updates[2].side, Side::SELL); // "offer" = SELL
     EXPECT_DOUBLE_EQ(batch.updates[2].price_level, 72580.0);
     EXPECT_DOUBLE_EQ(batch.updates[2].new_quantity, 13.0);
+}
+
+// Regression: new_at is an ISO-8601 timestamp string, but it was the one timestamp field in
+// Product parsed with INT_FROM_JSON. std::stoi stopped at the first non-digit and returned the
+// year, so new_at silently held 2023 instead of a timestamp - and because stoi succeeded, nothing
+// was logged. Offline, no credentials needed.
+TEST_F(TimestampParsingTests, ProductNewAtIsParsedAsTimestamp) {
+    auto j = json::parse(R"({
+        "product_id":"BTC-USD",
+        "quote_increment":"0.01",
+        "new_at":"2023-01-01T00:00:00Z"
+    })");
+
+    auto p = j.get<Product>();
+
+    EXPECT_EQ(p.new_at, to_nanoseconds("2023-01-01T00:00:00Z"));
+    EXPECT_NE(p.new_at, 2023u);   // what std::stoi produced
+}
+
+// Regression: the venue nulls new_at on futures contracts. The value macros guarded on contains()
+// but not on null, so the helper threw, the catch logged the whole product JSON at ERROR, and it
+// did so once per product parsed - which filled the logs as soon as futures were cached.
+TEST_F(TimestampParsingTests, NullFieldLeavesDefaultAndStillParsesTheRest) {
+    auto j = json::parse(R"({
+        "product_id":"BIT-30OCT26-CDE",
+        "quote_increment":"0.01",
+        "new_at":null
+    })");
+
+    auto p = j.get<Product>();
+
+    EXPECT_EQ(p.new_at, 0u);
+    // The null field does not abort the rest of the object.
+    EXPECT_EQ(p.product_id, "BIT-30OCT26-CDE");
+    EXPECT_DOUBLE_EQ(p.quote_increment, 0.01);
 }
 
 } // namespace coinbase::tests

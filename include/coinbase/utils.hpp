@@ -119,13 +119,18 @@ inline std::string to_string(double value, Side side, double min_increment) {
     return oss.str();
 }
 
-#define TIMESTAMP_FROM_JSON(j, o, field) if (j.contains(#field)) o.field = nanoseconds_from_json(j, #field)
-#define NANOSECONDS_FROM_JSON(j, o, field) if (j.contains(#field)) o.field = nanoseconds_from_json(j, #field)
-#define DOUBLE_FROM_JSON(j, o, field) if (j.contains(#field)) o.field = double_from_json(j, #field)
-#define INT_FROM_JSON(j, o, field) if (j.contains(#field)) o.field = int_from_json(j, #field)
+// A field that is present but null carries no value, so these leave the member at its default
+// rather than letting the helper throw: the venue nulls fields it does not populate for a
+// product class (new_at on futures contracts), and the catch in each helper logs the whole
+// JSON document at ERROR, once per object parsed. VARIABLE_FROM_JSON and STRUCT_FROM_JSON
+// already guarded this way; these did not.
+#define TIMESTAMP_FROM_JSON(j, o, field) if (j.contains(#field) && !j[#field].is_null()) o.field = nanoseconds_from_json(j, #field)
+#define NANOSECONDS_FROM_JSON(j, o, field) if (j.contains(#field) && !j[#field].is_null()) o.field = nanoseconds_from_json(j, #field)
+#define DOUBLE_FROM_JSON(j, o, field) if (j.contains(#field) && !j[#field].is_null()) o.field = double_from_json(j, #field)
+#define INT_FROM_JSON(j, o, field) if (j.contains(#field) && !j[#field].is_null()) o.field = int_from_json(j, #field)
 #define VARIABLE_FROM_JSON(j, o, field) if (j.contains(#field) && !j[#field].is_null()) try { j.at(#field).get_to(o.field); } catch(const std::exception &e) { LOG_INFO(#field " {}", j.dump()); LOG_ERROR(e.what()); }
 #define BOOL_FROM_JSON(j, o, field) if (j.contains(#field) && !j[#field].is_null() && j[#field].is_string()) { if (j[#field] == "true") o.field = true; else if (j[#field] == "false") o.field = false; } else try { j.at(#field).get_to(o.field); } catch(const std::exception &e) { LOG_INFO(#field " {}", j.dump()); LOG_ERROR(e.what()); }
 #define BOOL_FROM_JSON_VALUE(j, o, field, j_name) if (j.contains(j_name) && !j[j_name].is_null() && j[j_name].is_string()) { if (j[j_name] == "true") o.field = true; else if (j[j_name] == "false") o.field = false; } else try { j.at(j_name).get_to(o.field); } catch(const std::exception &e) { LOG_INFO(j_name " {}", j.dump()); LOG_ERROR(e.what()); }
 #define STRUCT_FROM_JSON(j, o, field) if (j.contains(#field) && !j[#field].is_null()) from_json(j[#field], o.field)
-#define ENUM_FROM_JSON(j, o, field) if (j.contains(#field)) try { o.field = to_##field(j.at(#field).get<std::string_view>()); } catch(const std::exception &e) { LOG_INFO(#field " {}", j.dump()); LOG_ERROR(e.what()); }
+#define ENUM_FROM_JSON(j, o, field) if (j.contains(#field) && !j[#field].is_null()) try { o.field = to_##field(j.at(#field).get<std::string_view>()); } catch(const std::exception &e) { LOG_INFO(#field " {}", j.dump()); LOG_ERROR(e.what()); }
 }   // end namespace coinbase
