@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-10-06
+
+### Changed
+- Tests build against `slick-logger` v2.2.0, up from v1.0.9. This is a test-only dependency and does not affect consumers of the library
+
+### Fixed
+- The v2.0.0 release declared `VERSION 1.0.1` in its CMake project, so its installed package config reported `PACKAGE_VERSION "1.0.1"`. Under `COMPATIBILITY SameMajorVersion` that made `find_package(coinbase-advanced-cpp 2.0.0)` fail against the 2.0.0 release, while a 1.x request wrongly succeeded and pulled in a release full of breaking changes. The project version now matches the release it ships in
+- `<coinbase/websocket.hpp>` now includes `<slick/queue.hpp>` instead of the deprecated `<slick/queue.h>`, so building against the library header no longer emits a deprecation warning. slick-net v4.0.0 ships both headers, so the minimum slick-net version is unchanged
+
 ## [2.0.0] - 2026-09-22
 
 ### Added
