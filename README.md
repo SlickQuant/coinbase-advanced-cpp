@@ -58,11 +58,11 @@ include/coinbase/
 ### Prerequisites
 
 - C++20 compatible compiler (GCC 10+, Clang 10+, MSVC 2019+)
-- CMake 3.20+
+- CMake 3.21+
 - OpenSSL
 - nlohmann/json (JSON library)
 - jwt-cpp (JSON Web Token library)
-- slick-net (networking library - automatically fetched via CMake)
+- slick-net 4.1.0+ (networking library - fetched via CMake when no installed package is found)
 - vcpkg (optional, dependency management)
 
 ### Building
@@ -79,9 +79,11 @@ The library is built as a static library for optimal compilation performance in 
 
 ### Using vcpkg (optional)
 
-This repo includes a `vcpkg.json` manifest. If you use vcpkg, dependencies are installed automatically via the toolchain file. If a vcpkg port for `slick-net` is available, it will be used; otherwise CMake falls back to FetchContent.
+This repo has no `vcpkg.json` manifest, so vcpkg does not install anything on its own. Install the dependencies yourself and point CMake at the vcpkg toolchain file, which lets `find_package()` resolve them. An installed `slick-net` port is used when it is 4.1.0 or newer; if it is older or missing, CMake falls back to FetchContent.
 
 ```bash
+vcpkg install nlohmann-json openssl jwt-cpp slick-net
+
 cmake -S . -B build \
   -DCMAKE_TOOLCHAIN_FILE=C:/path/to/vcpkg/scripts/buildsystems/vcpkg.cmake
 cmake --build build
@@ -440,6 +442,21 @@ The reader registers that producer on a multiplexer of its own, which is what ke
 reader: registering a producer on the multiplexer a `WebSocketClient` uses would claim an
 ID the client needs, and the client refuses such an ID rather than writing to a buffer it
 does not own.
+
+On POSIX the named segments persist. Since slick-net 4.1.0 nothing unlinks a shared-memory
+segment on destruction, so `my_mux_queue` and `my_btc_md_buf` stay in `/dev/shm` after both
+processes exit, and a restarted producer attaches to them - old records included - instead of
+starting fresh, and throws if it passes different buffer sizes. To start clean, remove every
+name before constructing, or at shutdown once no reader will attach again - only while no
+process is using the segments:
+
+```cpp
+slick::stream_buffer_multiplexer::remove("my_mux_queue");
+slick::stream_buffer_multiplexer::remove("my_btc_md_buf");
+```
+
+Windows is unaffected: a segment there is freed when its last handle closes, and `remove()`
+is a no-op.
 
 See `examples/multi_websockets_ws_callbacks.cpp` (producer) and `examples/multi_websockets_ws_callbacks_reader.cpp` (cross-process reader) for a complete two-symbol demo.
 

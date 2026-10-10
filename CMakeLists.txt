@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.21)
 set(CMAKE_CXX_STANDARD 20)
 
 project(coinbase-advanced-cpp
-    VERSION 2.0.1
+    VERSION 2.1.0
     LANGUAGES CXX)
 
 option(BUILD_COINBASE_ADVANCED_TESTS "Build coinbase advanced tests" ${PROJECT_IS_TOP_LEVEL})
@@ -21,13 +21,20 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(OpenSSL CONFIG REQUIRED)
 find_package(jwt-cpp CONFIG REQUIRED)
 
+# Minimum dependency versions. Each is used by find_package(), the FetchContent tag (upstream tags
+# are v-prefixed) and - through cmake/coinbase-advanced-cppConfig.cmake.in - the installed package's
+# find_dependency(), so the three cannot drift apart.
+set(SLICK_QUEUE_MIN_VERSION 2.3.0)
+set(SLICK_NET_MIN_VERSION 4.1.0)
+
 if (BUILD_COINBASE_ADVANCED_TESTS)
-    # slick-logger in tests requires a higher version of slick-queue then slick-net, so we fetch it if not found
-    # It has to be declared before slick-net below: slick-net pulls stream-buffer-multiplexer
-    # v2.0.0, which declares and populates slick-queue v2.0.0, and FetchContent keeps only the
+    # slick-logger in tests can require a higher version of slick-queue than slick-net, so we fetch it if not found
+    # It has to be declared before slick-net below: slick-net pulls stream-buffer-multiplexer,
+    # which declares and populates slick-queue at its own pin, and FetchContent keeps only the
     # FIRST declaration of a name - so declaring it later (in tests/CMakeLists.txt, say) is
-    # silently ignored and slick-logger fails to compile against v2.0.0.
-    find_package(slick-queue 2.1.0 CONFIG QUIET)
+    # silently ignored and slick-logger fails to compile against an older queue. slick-net v4.1.0
+    # and slick-logger v2.2.1 both pin slick-queue v2.3.0, so today this only keeps the three in step.
+    find_package(slick-queue ${SLICK_QUEUE_MIN_VERSION} CONFIG QUIET)
     if (NOT slick-queue_FOUND)
         message(STATUS "fetching slick-queue...")
         include(FetchContent)
@@ -36,12 +43,12 @@ if (BUILD_COINBASE_ADVANCED_TESTS)
             slick-queue
             GIT_REPOSITORY
             https://github.com/SlickQuant/slick-queue.git
-            GIT_TAG v2.1.0
+            GIT_TAG v${SLICK_QUEUE_MIN_VERSION}
         )
     endif()
 endif()
 
-find_package(slick-net 4.0.0 CONFIG QUIET)
+find_package(slick-net ${SLICK_NET_MIN_VERSION} CONFIG QUIET)
 if (NOT slick-net_FOUND)
     message(STATUS "fetching slick-net...")
     include(FetchContent)
@@ -50,7 +57,7 @@ if (NOT slick-net_FOUND)
     FetchContent_Declare(
         slick-net
         GIT_REPOSITORY https://github.com/SlickQuant/slick-net.git
-        GIT_TAG v4.0.0
+        GIT_TAG v${SLICK_NET_MIN_VERSION}
     )
     FetchContent_MakeAvailable(slick-net)
 else()

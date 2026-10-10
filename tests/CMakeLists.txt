@@ -18,7 +18,9 @@ else()
     FetchContent_MakeAvailable(googletest)
 endif()
 
-find_package(slick-logger 2.2.0 CONFIG QUIET)
+set(SLICK_LOGGER_MIN_VERSION 2.2.1)
+
+find_package(slick-logger ${SLICK_LOGGER_MIN_VERSION} CONFIG QUIET)
 if (NOT slick-logger_FOUND)
     message(STATUS "Fetching slick-logger...")
     set(BUILD_SLICK_LOGGER_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -27,7 +29,7 @@ if (NOT slick-logger_FOUND)
     FetchContent_Declare(
         slick-logger
         GIT_REPOSITORY https://github.com/SlickQuant/slick-logger.git
-        GIT_TAG v2.2.0
+        GIT_TAG v${SLICK_LOGGER_MIN_VERSION}
     )
     FetchContent_MakeAvailable(slick-logger)
 endif()

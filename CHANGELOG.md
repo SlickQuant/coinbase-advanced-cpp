@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-10-10
+
+Tracks the slick-net v4.1.0 release. No code in this library changed; the behaviour change below arrives through the raised dependency floor.
+
+### Changed
+- `slick-net` v4.1.0 is now required (was v4.0.0), in the build's `find_package()` / FetchContent pin and in the installed package config (`find_dependency(slick-net 4.1.0 CONFIG)`), so a consumer that resolves an installed slick-net 4.0.x now fails at configure time. slick-net v4.1.0 in turn requires `slick-stream-buffer-multiplexer` v2.1.0, `slick-stream-buffer` v2.1.0 and `slick-queue` v2.3.0
+- **Behaviour change (POSIX), inherited from those releases:** a shared-memory segment is no longer unlinked on destruction, not even by the instance that created it. This only concerns a `WebSocketClient` that was given a `mux_shm_name`, `md_read_buffer_shm_name` or `user_read_buffer_shm_name`, or that shares a named `slick::stream_buffer_multiplexer`: its segments now stay in `/dev/shm` after exit, and the next run attaches to them instead of starting fresh - the shared record queue still holds the old records, and a creator passing different buffer sizes throws. Previously a producer that exited first unlinked the names while a reader was still attached, so a restarted producer silently created fresh segments and the two never met again. Call `slick::stream_buffer_multiplexer::remove(name)` for every name at startup to start clean, or at shutdown once no peer will attach again. Clients on local memory - the default - and Windows are unaffected, and the shared-memory formats did not change
+- Tests build against `slick-logger` v2.2.1 (was v2.2.0), and the `slick-queue` a source build declares ahead of `slick-net` is v2.3.0 (was v2.1.0). Both are test-only. slick-net v4.1.0 and slick-logger v2.2.1 now pin the same `slick-queue`, so the two no longer disagree about it
+- Each dependency floor is defined once in the CMake build and used by `find_package()`, the FetchContent tag and - for `slick-net` - the installed package's `find_dependency()`, so the build and the installed package can no longer require different versions
+
 ## [2.0.1] - 2026-10-06
 
 ### Changed
