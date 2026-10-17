@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-10-17
+
+Tracks the slick-net v4.1.1 release.
+
+### Changed
+- `slick-net` v4.1.1 is now required (was v4.1.0), in the build's `find_package()` / FetchContent pin and in the installed package config (`find_dependency(slick-net 4.1.1 CONFIG)`). slick-net v4.1.1 changes no code of its own: it raises its `slick-stream-buffer-multiplexer` floor to v2.2.0, whose `slick-stream-buffer` v2.1.0 and `slick-queue` v2.3.0 floors are unchanged. That multiplexer can also take `slick::queue<uint8_t>` producers (`add_queue_producer()`), and a producer registration that throws no longer leaves a half-registered producer behind. Record and shared-memory formats are unchanged
+
+### Fixed
+- A queue producer that code outside this library registered inside a client's producer id range went undetected. It shares the id namespace with `stream_buffer` producers, but `get_producer_buffer()` returns `nullptr` for it, so `isProducerOffsetAvailable()` reported the offset available while the constructor then threw `std::invalid_argument` from the multiplexer's `add_producer()` - breaking the guarantee that the two always agree. A queue producer is now treated like any other foreign producer: the offset is unavailable, and the constructor throws before registering anything. This could only arise with `slick-stream-buffer-multiplexer` v2.2.0 or later, which this release requires
+
 ## [2.1.0] - 2026-10-10
 
 Tracks the slick-net v4.1.0 release. No code in this library changed; the behaviour change below arrives through the raised dependency floor.

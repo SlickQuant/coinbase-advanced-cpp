@@ -161,7 +161,12 @@ ClaimResult scanProducerId(slick::stream_buffer_multiplexer& mux, ProducerClaims
         }
     }
     // No client of this library holds the id - but it is only ours to take if nothing
-    // else has registered a producer under it.
+    // else has registered a producer under it. That includes a queue producer
+    // (add_queue_producer()): it shares the id namespace yet is invisible to
+    // get_producer_buffer(), and this library never registers one.
+    if (mux.get_producer_queue(id)) {
+        return ClaimResult::foreign_producer;
+    }
     return producerProvenance(claimed, mux.get_producer_buffer(id)) == Provenance::foreign
             ? ClaimResult::foreign_producer : ClaimResult::ok;
 }

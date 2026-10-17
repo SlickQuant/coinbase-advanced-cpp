@@ -767,6 +767,31 @@ namespace coinbase::tests {
         }
     }
 
+    // slick-stream-buffer-multiplexer 2.2.0 added queue producers (add_queue_producer()). They
+    // share the producer id namespace, but get_producer_buffer() returns nullptr for one, so a
+    // check that looks only at stream_buffer producers took the id for free: the offset was
+    // reported available while the constructor then threw from add_producer().
+    TEST(WebSocketClientUnitTests, ForeignQueueProducerInOffsetRangeIsRejected) {
+        constexpr uint32_t kOffset = 0;
+        constexpr uint32_t kBufferSize = 1u << 16;
+        constexpr uint32_t kRecordSize = 256;
+
+        for (uint32_t i = 0; i < ProducerType::_PRODUCER_TYPE_COUNT_; ++i) {
+            ConcreteUserThreadCallbacks callbacks;
+            slick::stream_buffer_multiplexer mux(1024);     // one mux per id: no remove_producer()
+            const auto* foreign = mux.add_queue_producer(kOffset + i, 1024).get();
+            ASSERT_NE(foreign, nullptr);
+
+            EXPECT_FALSE(WebSocketClient::isProducerOffsetAvailable(mux, kOffset));
+            EXPECT_THROW(makeExternalMuxClient(callbacks, mux, kOffset, kBufferSize, kRecordSize),
+                         std::invalid_argument);
+
+            // Refused before registering anything, and the foreign producer is untouched.
+            EXPECT_EQ(mux.producer_count(), 1u);
+            EXPECT_EQ(mux.get_producer_queue(kOffset + i).get(), foreign);
+        }
+    }
+
     // Only the range a foreign producer sits in is refused, so a multiplexer shared with
     // code that registers producers of its own still serves clients at other offsets.
     TEST(WebSocketClientUnitTests, ForeignProducerDoesNotBlockOtherOffsets) {

@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.21)
 set(CMAKE_CXX_STANDARD 20)
 
 project(coinbase-advanced-cpp
-    VERSION 2.1.0
+    VERSION 2.1.1
     LANGUAGES CXX)
 
 option(BUILD_COINBASE_ADVANCED_TESTS "Build coinbase advanced tests" ${PROJECT_IS_TOP_LEVEL})
@@ -25,7 +25,7 @@ find_package(jwt-cpp CONFIG REQUIRED)
 # are v-prefixed) and - through cmake/coinbase-advanced-cppConfig.cmake.in - the installed package's
 # find_dependency(), so the three cannot drift apart.
 set(SLICK_QUEUE_MIN_VERSION 2.3.0)
-set(SLICK_NET_MIN_VERSION 4.1.0)
+set(SLICK_NET_MIN_VERSION 4.1.1)
 
 if (BUILD_COINBASE_ADVANCED_TESTS)
     # slick-logger in tests can require a higher version of slick-queue than slick-net, so we fetch it if not found

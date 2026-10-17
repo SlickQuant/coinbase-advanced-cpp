@@ -62,7 +62,7 @@ include/coinbase/
 - OpenSSL
 - nlohmann/json (JSON library)
 - jwt-cpp (JSON Web Token library)
-- slick-net 4.1.0+ (networking library - fetched via CMake when no installed package is found)
+- slick-net 4.1.1+ (networking library - fetched via CMake when no installed package is found)
 - vcpkg (optional, dependency management)
 
 ### Building
@@ -79,7 +79,7 @@ The library is built as a static library for optimal compilation performance in 
 
 ### Using vcpkg (optional)
 
-This repo has no `vcpkg.json` manifest, so vcpkg does not install anything on its own. Install the dependencies yourself and point CMake at the vcpkg toolchain file, which lets `find_package()` resolve them. An installed `slick-net` port is used when it is 4.1.0 or newer; if it is older or missing, CMake falls back to FetchContent.
+This repo has no `vcpkg.json` manifest, so vcpkg does not install anything on its own. Install the dependencies yourself and point CMake at the vcpkg toolchain file, which lets `find_package()` resolve them. An installed `slick-net` port is used when it is 4.1.1 or newer; if it is older or missing, CMake falls back to FetchContent.
 
 ```bash
 vcpkg install nlohmann-json openssl jwt-cpp slick-net
@@ -358,8 +358,9 @@ with `stop()` is not enough — ownership is released by the destructor.
 
 Reuse is also limited to producers a `WebSocketClient` registered. A producer your
 own code (or any other library) registered on a shared multiplexer is left strictly
-alone: its owner registered it in order to write to it, and a producer buffer has a
-single-producer contract. Constructing a client whose ID range covers such a producer
+alone - a `stream_buffer` producer from `add_producer()` and a queue producer from
+`add_queue_producer()` alike: its owner registered it in order to write to it, and a
+producer has a single-producer contract. Constructing a client whose ID range covers such a producer
 throws `std::invalid_argument`, and `isProducerOffsetAvailable()` reports the offset
 as unavailable — give the client a `producer_offset` whose whole range is its own.
 
